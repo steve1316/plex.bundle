@@ -5,7 +5,8 @@ from datetime import datetime
 
 class Person(unicode):
     photo = None  # type: Resource
-    japanese_name = None  # type: str
+    reading = None  # type: str  # hiragana reading, used for romanization
+    japanese_name = None  # type: str  # Japanese display name (kanji/kana as scraped)
 
 
 class Resource(unicode):
