@@ -6,6 +6,7 @@ from collections import OrderedDict
 import json
 import logging
 import os
+import struct
 import requests
 from urlparse import urlparse
 
@@ -187,6 +188,7 @@ class JAVAgent(Agent.Movies):
 
     def apply_metadata(self, movie, metadata, lang):
         movie.content_rating_age = 18
+        movie.content_rating = "XXX"
         movie.countries.clear()
         movie.countries.add("JP")
 
@@ -218,36 +220,46 @@ class JAVAgent(Agent.Movies):
             movie.roles.clear()
             for o in metadata.actresses:
                 role = movie.roles.new()
-                role.name = o
+                # Show the Japanese name in parentheses after the romaji name
+                # (e.g. "Himesaki Hana (...)") when both are available.
+                ja = getattr(o, "japanese_name", None)
+                role.name = u"{0} ({1})".format(o, ja) if ja and ja != o else o
                 role.photo = o.photo
         if metadata.directors:
             movie.directors.clear()
             for o in metadata.directors:
                 director = movie.directors.new()
-                director.name = o
+                ja = getattr(o, "japanese_name", None)
+                director.name = u"{0} ({1})".format(o, ja) if ja and ja != o else o
                 director.photo = o.photo
 
-        for attr in ["posters", "art"]:
-            data = getattr(metadata, attr)
-            if data:
-                container = getattr(movie, attr)
-                container.validate_keys([])
-                for r in data:
-                    if r.thumb:
-                        klass = Proxy.Preview
-                        thumb_url = r.thumb
-                    else:
-                        klass = Proxy.Media
-                        thumb_url = r
-                    try:
-                        resp = requests.get(thumb_url)
-                        resp.raise_for_status()
-                    except Exception as e:
-                        Log.Exception("Failed to download %s from %s: %s",
-                                      attr, thumb_url, e)
-                        continue
-                    container[r] = klass(resp.content)
-                    break  # only use the first valid image
+        # Clear stored images first so stale posters and art never linger, even when this match produced none.
+        movie.posters.validate_keys([])
+        movie.art.validate_keys([])
+
+        # Download only the single highest-quality cover as the poster. The large cover often lives in the art list, so pool the
+        # cover-quality art (score >= 50) with the posters. Lower-scored scene stills are skipped.
+        poster_candidates = self.dedup_resources(
+            list(metadata.posters or []) +
+            [a for a in (metadata.art or []) if a.score >= 50])
+        best_poster = self.pick_best_poster(poster_candidates)
+        downloaded = {}
+        if best_poster is not None:
+            data = self.download_image(best_poster)
+            if data is not None:
+                # Keep the original (uncropped) bytes for art reuse below, but crop the front cover out for the poster.
+                downloaded[best_poster] = data
+                movie.posters[best_poster] = Proxy.Media(self.crop_front_cover(data))
+
+        # Keep the largest cover-quality image as the fanart backdrop. Reuse the poster bytes when it is the same image.
+        best_art = self.pick_largest_image(self.dedup_resources(
+            [a for a in (metadata.art or []) if a.score >= 50]))
+        if best_art is not None:
+            data = downloaded.get(best_art)
+            if data is None:
+                data = self.download_image(best_art)
+            if data is not None:
+                movie.art[best_art] = Proxy.Media(data)
 
         if metadata.trailers:
             trailer = TrailerObject(
@@ -280,6 +292,166 @@ class JAVAgent(Agent.Movies):
             movie.tags.clear()
             for t in tags:
                 movie.tags.add(t)
+
+    def dedup_resources(self, resources):
+        """Return the resources in order with duplicates and preview-thumb entries removed.
+
+        Args:
+            resources (list): Candidate image resources.
+
+        Returns:
+            list: The de-duplicated image resources, preserving order.
+        """
+        seen = set()
+        out = []
+        for r in resources:
+            if r and not r.thumb and r not in seen:
+                seen.add(r)
+                out.append(r)
+        return out
+
+    def image_size(self, url):
+        """Return the byte size of the image at `url` via a HEAD request.
+
+        Args:
+            url (str): The image URL to size.
+
+        Returns:
+            int: The Content-Length in bytes, or -1 when the request fails or the resource is not an image.
+        """
+        try:
+            resp = requests.head(url, allow_redirects=True)
+            resp.raise_for_status()
+            if not resp.headers.get("Content-Type", "").startswith("image/"):
+                return -1
+            return int(resp.headers.get("Content-Length") or 0)
+        except Exception as e:
+            Log.Info("Failed to size image %s: %s", url, e)
+            return -1
+
+    def pick_largest_image(self, resources):
+        """Return the resource whose image has the largest byte size.
+
+        Falls back to the first (highest-scored) resource when no sizes can be measured.
+
+        Args:
+            resources (list): Candidate image resources, ordered by score.
+
+        Returns:
+            The chosen resource, or None when the list is empty.
+        """
+        best = None
+        best_size = -1
+        for r in resources:
+            size = self.image_size(r)
+            if size > best_size:
+                best_size = size
+                best = r
+        if best is None and resources:
+            best = resources[0]
+        return best
+
+    def image_dimensions(self, url):
+        """Return the (width, height) of the image at `url`, or None.
+
+        Range-reads only the first 64 KB so orientation can be checked cheaply without downloading the whole image.
+
+        Args:
+            url (str): The image URL to measure.
+
+        Returns:
+            tuple[int, int]: The (width, height), or None when it cannot be determined.
+        """
+        try:
+            resp = requests.get(
+                url, headers={"Range": "bytes=0-65535"}, timeout=15)
+            resp.raise_for_status()
+            return parse_jpeg_dimensions(resp.content)
+        except Exception as e:
+            Log.Info("Failed to read dimensions of %s: %s", url, e)
+            return None
+
+    def is_portrait(self, resource):
+        """Return True when the image is a native portrait (taller than wide).
+
+        A portrait image is a ready-to-use front-cover poster. A landscape image is a wide front+back cover (or a promo
+        montage / scene still) that would need cropping.
+
+        Args:
+            resource: The image resource to check.
+
+        Returns:
+            bool: True when the image is portrait-oriented.
+        """
+        dims = self.image_dimensions(resource)
+        return bool(dims and dims[0] < dims[1])
+
+    def pick_best_poster(self, resources):
+        """Return the best poster, preferring a native portrait cover over a landscape one.
+
+        A native portrait (e.g. DMM's `jp-1` front cover) is used as-is with no cropping. When no candidate is a
+        portrait, the best landscape cover is chosen (and cropped to the front later). Within the chosen orientation,
+        score comes first so a high-quality cover is not displaced by a larger but lower-scored one, with file size only
+        breaking ties.
+
+        Args:
+            resources (list): Candidate poster/cover resources.
+
+        Returns:
+            The chosen resource, or None when the list is empty.
+        """
+        if not resources:
+            return None
+        portraits = [r for r in resources if self.is_portrait(r)]
+        pool = portraits or resources
+        top_score = max(r.score for r in pool)
+        return self.pick_largest_image(
+            [r for r in pool if r.score == top_score])
+
+    def download_image(self, url):
+        """Download the raw image bytes at `url`.
+
+        Args:
+            url (str): The image URL to download.
+
+        Returns:
+            The raw image bytes, or None when the download fails.
+        """
+        try:
+            resp = requests.get(url)
+            resp.raise_for_status()
+            return resp.content
+        except Exception as e:
+            Log.Exception("Failed to download image from %s: %s", url, e)
+            return None
+
+    def crop_front_cover(self, data):
+        """Crop the front cover (right portion) out of a wide front+back cover.
+
+        Uses the bundled PIL when it loads. Wide double-covers (aspect > 1.2) are cropped to just the front cover on the right. Portrait covers, and any case where PIL is unavailable or fails, return the original bytes unchanged.
+
+        Args:
+            data (str): The raw image bytes.
+
+        Returns:
+            str: The cropped JPEG bytes, or the original bytes when cropping does not apply or is unavailable.
+        """
+        try:
+            from PIL import Image
+            from io import BytesIO
+            img = Image.open(BytesIO(data))
+            width, height = img.size
+            if width <= 0 or height <= 0 or float(width) / float(height) < 1.2:
+                return data
+            front_width = int(round(width * 0.4725))
+            crop = img.crop((width - front_width, 0, width, height)).convert("RGB")
+            out = BytesIO()
+            crop.save(out, format="JPEG", quality=95)
+            Log.Info("Cropped front cover from %dx%d to %dx%d", width, height, front_width, height)
+            return out.getvalue()
+        except Exception as e:
+            Log.Info("Front-cover crop skipped (%s)", e)
+            return data
 
     @classmethod
     def normalize_lang(cls, lang):
@@ -362,12 +534,37 @@ class PlexLogHandler(logging.Handler):
             self.handleError(record)
 
 
+def mask_proxy_url(url):
+    """Hide the user:pass credentials in a proxy URL before logging it.
+
+    Args:
+        url: The proxy URL, possibly containing credentials, or a falsy value.
+
+    Returns:
+        The URL with any credentials replaced by "***", or the value unchanged when there are none.
+    """
+    if not url or "@" not in url:
+        return url
+    if "://" in url:
+        scheme, rest = url.split("://", 1)
+        prefix = scheme + "://"
+    else:
+        prefix, rest = "", url
+    return prefix + "***@" + rest.split("@", 1)[1]
+
+
 def log_prefs():
-    prefs = [(key, Prefs[key]) for key in [
+    proxy_keys = ("proxy", "geo_proxy")
+    prefs = []
+    for key in [
         "series_as_collection",
         "proxy",
+        "geo_proxy",
         "flaresolverr_url",
         "user_agent",
+        "avbase_enabled",
+        "duga_enabled",
+        "buena_enabled",
         "javlibrary_enabled",
         "javlibrary_cf_clearance",
         "dmm_enabled",
@@ -375,8 +572,47 @@ def log_prefs():
         "seesaawiki_enabled",
         "gfriends_enabled",
         "warashipornstars_enabled",
-    ]]
+        "translate_enabled",
+        "ollama_url",
+        "ollama_model",
+    ]:
+        value = Prefs[key]
+        if key in proxy_keys:
+            value = mask_proxy_url(value)
+        prefs.append((key, value))
     Log.Info("Current preferences: %s", prefs)
+
+
+def parse_jpeg_dimensions(data):
+    """Return the (width, height) of a JPEG from its leading bytes, or None.
+
+    Walks the JPEG segment markers to the start-of-frame (SOF) header, which carries the height and width. A small
+    prefix of the file (the first tens of KB) is enough, so callers can range-read instead of downloading the whole
+    image. Pure ASCII/`struct` only, so it runs inside the Plex sandbox without PIL.
+
+    Args:
+        data: The leading bytes of a JPEG file.
+
+    Returns:
+        tuple[int, int]: The (width, height), or None when no SOF header is found in `data`.
+    """
+    sof_markers = "\xc0\xc1\xc2\xc3\xc5\xc6\xc7\xc9\xca\xcb\xcd\xce\xcf"
+    i, n = 2, len(data)
+    while i + 9 <= n:
+        if data[i] != "\xff":
+            i += 1
+            continue
+        marker = data[i + 1]
+        if marker in sof_markers:
+            height = struct.unpack(">H", data[i + 5:i + 7])[0]
+            width = struct.unpack(">H", data[i + 7:i + 9])[0]
+            return (width, height)
+        # Standalone markers (SOI/EOI/RSTn) carry no length payload.
+        if marker == "\xd8" or marker == "\xd9" or ("\xd0" <= marker <= "\xd7"):
+            i += 2
+            continue
+        i += 2 + struct.unpack(">H", data[i + 2:i + 4])[0]
+    return None
 
 
 def is_legacy_metadata_id(metadata_id):

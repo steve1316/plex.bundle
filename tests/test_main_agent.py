@@ -3,6 +3,7 @@
 from base import BaseTestCase
 
 import datetime
+import struct
 import unittest
 
 import mock
@@ -148,6 +149,7 @@ class TestApplyMetadata(BaseTestCase):
         self.assertEqual(movie.studio, "TestStudio")
         self.assertEqual(movie.duration, 7200000)
         self.assertEqual(movie.content_rating_age, 18)
+        self.assertEqual(movie.content_rating, "XXX")
         self.assertIn("JP", movie.countries)
 
     def test_genres_applied(self):
@@ -192,6 +194,24 @@ class TestApplyMetadata(BaseTestCase):
         self.assertEqual(len(movie.roles), 1)
         self.assertEqual(movie.roles[0].name, "Actress One")
         self.assertEqual(movie.roles[0].photo, "http://photo/1.jpg")
+
+    def test_actress_role_combines_japanese_name(self):
+        meta = Metadata()
+        meta.title = "T"
+        a = Person(u"Himesaki Hana")
+        a.japanese_name = u"姫咲はな"
+        meta.actresses = [a]
+        movie = self._apply(meta)
+        self.assertEqual(movie.roles[0].name, u"Himesaki Hana (姫咲はな)")
+
+    def test_actress_role_plain_when_only_japanese_name(self):
+        # No romaji translation happened, so the name stays Japanese and is not
+        # doubled up.
+        meta = Metadata()
+        meta.title = "T"
+        meta.actresses = [Person(u"姫咲はな")]
+        movie = self._apply(meta)
+        self.assertEqual(movie.roles[0].name, u"姫咲はな")
 
     def test_directors_applied(self):
         meta = Metadata()
@@ -244,6 +264,150 @@ class TestApplyMetadata(BaseTestCase):
         meta.studio = "StudioX"
         movie = self._apply(meta)
         self.assertIn("StudioX", movie.similar)
+
+
+class TestPosterSelection(BaseTestCase):
+
+    def test_pick_largest_image_by_size(self):
+        agent = JAVAgent()
+        sizes = {u"a": 100, u"b": 5000, u"c": 900}
+        agent.image_size = lambda url: sizes.get(url, -1)
+        self.assertEqual(u"b", agent.pick_largest_image([u"a", u"b", u"c"]))
+
+    def test_pick_largest_image_falls_back_to_first(self):
+        agent = JAVAgent()
+        agent.image_size = lambda url: -1
+        self.assertEqual(u"x", agent.pick_largest_image([u"x", u"y"]))
+        self.assertIsNone(agent.pick_largest_image([]))
+
+    def test_crop_front_cover_falls_back_on_bad_data(self):
+        # Non-image bytes (or PIL being unavailable) must return the original bytes unchanged.
+        agent = JAVAgent()
+        self.assertEqual(b"not-an-image", agent.crop_front_cover(b"not-an-image"))
+
+    def _res(self, name, score):
+        r = Resource(name)
+        r.score = score
+        return r
+
+    def test_best_poster_prefers_higher_score_over_size(self):
+        # With no portrait candidate, a larger but lower-scored poster (DMM, 55) must not displace a higher-scored one.
+        agent = JAVAgent()
+        agent.is_portrait = lambda r: False
+        dmm = self._res(u"dmm", 55)
+        avbase = self._res(u"avbase", 60)
+        sizes = {dmm: 9000, avbase: 100}
+        agent.image_size = lambda r: sizes.get(r, -1)
+        self.assertEqual(avbase, agent.pick_best_poster([dmm, avbase]))
+
+    def test_best_poster_uses_size_within_top_score(self):
+        agent = JAVAgent()
+        agent.is_portrait = lambda r: False
+        a = self._res(u"a", 60)
+        b = self._res(u"b", 60)
+        c = self._res(u"c", 55)
+        sizes = {a: 100, b: 5000, c: 9000}
+        agent.image_size = lambda r: sizes.get(r, -1)
+        self.assertEqual(b, agent.pick_best_poster([a, b, c]))
+
+    def test_best_poster_prefers_native_portrait(self):
+        # A native portrait cover (jp-1) wins even over a larger, higher-scored landscape cover.
+        agent = JAVAgent()
+        portrait = self._res(u"jp1", 45)
+        landscape = self._res(u"cover", 60)
+        agent.is_portrait = lambda r: r is portrait
+        agent.image_size = lambda r: 9000 if r is landscape else 100
+        self.assertEqual(portrait, agent.pick_best_poster([landscape, portrait]))
+
+    def test_best_poster_falls_back_when_no_portrait(self):
+        agent = JAVAgent()
+        agent.is_portrait = lambda r: False
+        a = self._res(u"a", 60)
+        b = self._res(u"b", 50)
+        agent.image_size = lambda r: 100
+        self.assertEqual(a, agent.pick_best_poster([a, b]))
+
+    def test_best_poster_empty(self):
+        self.assertIsNone(JAVAgent().pick_best_poster([]))
+
+
+class TestParseJpegDimensions(BaseTestCase):
+    def _jpeg(self, width, height):
+        # Minimal JPEG: SOI + APP0 stub + SOF0 carrying height/width.
+        return (b"\xff\xd8"
+                + b"\xff\xe0\x00\x04ab"
+                + b"\xff\xc0\x00\x11\x08"
+                + struct.pack(">H", height) + struct.pack(">H", width)
+                + b"\x03\x01\x22\x00")
+
+    def test_portrait_dimensions(self):
+        self.assertEqual((563, 800),
+                         _main.parse_jpeg_dimensions(self._jpeg(563, 800)))
+
+    def test_landscape_dimensions(self):
+        self.assertEqual((800, 600),
+                         _main.parse_jpeg_dimensions(self._jpeg(800, 600)))
+
+    def test_non_jpeg_returns_none(self):
+        self.assertIsNone(_main.parse_jpeg_dimensions(b"not-a-jpeg-file-at-all"))
+
+    def test_dedup_resources_skips_dupes_and_thumbs(self):
+        agent = JAVAgent()
+        a = Resource("http://a")
+        b = Resource("http://a")  # duplicate URL
+        c = Resource("http://c")
+        c.thumb = "http://c/thumb"  # preview thumb -> skipped
+        self.assertEqual(
+            [u"http://a"], [unicode(r) for r in agent.dedup_resources([a, b, c])])
+
+    def test_poster_picks_largest_cover_and_clears_stale(self):
+        meta = Metadata()
+        meta.title = "T"
+        small = Resource("http://x/small.jpg")
+        small.score = 60
+        big = Resource("http://x/big.jpg")
+        big.score = 60  # same top score as the poster -> file size breaks the tie
+        scene = Resource("http://x/scene.jpg")
+        scene.score = 30  # low-scored scene still -> excluded despite being largest
+        meta.posters = [small]
+        meta.art = [big, scene]
+
+        movie = Movie()
+        movie.posters["http://old/stale.jpg"] = "old"
+        movie.art["http://old/stale_art.jpg"] = "old"
+
+        sizes = {
+            "http://x/small.jpg": 10000,
+            "http://x/big.jpg": 200000,
+            "http://x/scene.jpg": 500000,  # largest, but must be excluded by score
+        }
+
+        def fake_head(url, **kwargs):
+            resp = mock.MagicMock()
+            resp.headers = {"Content-Type": "image/jpeg",
+                            "Content-Length": str(sizes[url])}
+            resp.raise_for_status.return_value = None
+            return resp
+
+        def fake_get(url, *args, **kwargs):
+            resp = mock.MagicMock()
+            resp.content = b"bytes-of-" + url.encode("utf-8")
+            resp.raise_for_status.return_value = None
+            return resp
+
+        with mock.patch.object(_main, "requests") as mock_requests:
+            mock_requests.head.side_effect = fake_head
+            mock_requests.get.side_effect = fake_get
+            JAVAgent().apply_metadata(movie, meta, "ja")
+
+        # stale poster cleared; exactly one poster, the big cover (scene excluded despite its larger size)
+        self.assertEqual(len(movie.posters), 1)
+        self.assertIn("http://x/big.jpg", movie.posters)
+        self.assertNotIn("http://old/stale.jpg", movie.posters)
+        # background art is the big cover; stale art cleared; the low-scored scene is not used
+        self.assertIn("http://x/big.jpg", movie.art)
+        self.assertNotIn("http://old/stale_art.jpg", movie.art)
+        self.assertNotIn("http://x/scene.jpg", movie.art)
 
 
 class TestJAVAgentSearch(BaseTestCase):
