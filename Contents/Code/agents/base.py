@@ -25,6 +25,8 @@ class BaseAgent(object):
 
     name = None  # type: str
     weight = 0  # type: int
+    # Geo-blocked agents that fetch via plain requests set this True to route through the dedicated `geo_proxy`.
+    geo_restricted = False
 
     def __init__(self, prefs):
         self.prefs = prefs
@@ -107,8 +109,8 @@ class BaseAgent(object):
         """
         if self.requests_session is None:
             self.requests_session = self.create_session()
-        self.requests_session.proxies = self.http_proxy
-        self.requests_session.trust_env = not self.http_proxy
+        self.requests_session.proxies = self.session_proxy
+        self.requests_session.trust_env = not self.session_proxy
         if self.prefs["user_agent"]:
             self.requests_session.headers["User-Agent"] = self.prefs["user_agent"]
         else:
@@ -145,13 +147,37 @@ class BaseAgent(object):
     @property
     def http_proxy(self):
         """
-        Return the configured HTTP proxy URL, or ``None`` if not set.
+        Return the global HTTP proxy setting, or ``None`` if not set.
+
+        This is the proxy applied to the shared FlareSolverr session. Requests
+        sessions use `session_proxy` instead, which is geo-aware.
 
         Returns:
             dict: A dictionary with "http" and "https" keys for the proxy
                   URLs, or an empty dictionary if no proxy is configured.
         """
         proxy = self.prefs["proxy"] or None
+        if proxy:
+            return {"http": proxy, "https": proxy}
+        return {}
+
+    @property
+    def session_proxy(self):
+        """
+        Return the proxy dict for this agent's requests session.
+
+        Geo-restricted agents (DMM, MGStage) prefer the dedicated `geo_proxy`,
+        falling back to the global `proxy`. All other agents use `proxy` only,
+        so FlareSolverr-backed agents are never routed through `geo_proxy`.
+
+        Returns:
+            dict: A dictionary with "http" and "https" keys, or an empty
+                  dictionary when no applicable proxy is configured.
+        """
+        if self.geo_restricted:
+            proxy = self.prefs["geo_proxy"] or self.prefs["proxy"] or None
+        else:
+            proxy = self.prefs["proxy"] or None
         if proxy:
             return {"http": proxy, "https": proxy}
         return {}
@@ -234,10 +260,11 @@ class MetadataAgent(BaseAgent):
         """
         if new_value is None:
             return False
+        # Media containers accumulate across agents (merged in get_contribution_value), so always contribute.
+        if attribute in ["posters", "art", "themes", "trailers"]:
+            return True
         current_value = getattr(metadata, attribute)
         if current_value is None:
-            return True
-        if attribute in ["posters", "art", "themes", "trailers"]:
             return True
         return False
 
