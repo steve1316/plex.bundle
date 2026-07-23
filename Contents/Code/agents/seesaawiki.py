@@ -21,6 +21,8 @@ class SeesaaWiki(PartialMetadataAgent):
 
     def __init__(self, *args, **kwargs):
         self.cache = {}
+        # Resolved page name -> hiragana reading, filled by resolve_page_name.
+        self.reading_cache = {}
         super(SeesaaWiki, self).__init__(*args, **kwargs)
 
     @property
@@ -42,7 +44,8 @@ class SeesaaWiki(PartialMetadataAgent):
                 self.logger.debug("Discovered actresses for %s: %s",
                                   video_code, u", ".join(str(a) for a in actresses))
 
-        # Correct each actress name via page-name lookup.
+        # Correct each actress name via page-name lookup, and attach the reading
+        # found on her wiki page so the translator can romanize it correctly.
         corrected = []
         for actress in actresses:
             try:
@@ -51,11 +54,18 @@ class SeesaaWiki(PartialMetadataAgent):
                 new_name = actress
                 self.logger.exception(
                     "Error correcting actress name: %s", actress)
-            if new_name and new_name != actress:
-                self.logger.debug("Corrected actress name: %s -> %s",
-                                  actress, new_name)
+            original_reading = getattr(actress, "reading", None)
+            # Keep an existing (agent-supplied) reading; only fill in from the
+            # wiki when the actress has none yet.
+            reading = original_reading or self.reading_cache.get(new_name)
+            if new_name != actress or reading != original_reading:
+                if new_name != actress:
+                    self.logger.debug("Corrected actress name: %s -> %s",
+                                      actress, new_name)
                 p = Person(new_name)
                 p.photo = actress.photo
+                p.reading = reading
+                p.japanese_name = getattr(actress, "japanese_name", None)
                 corrected.append(p)
             else:
                 corrected.append(actress)
@@ -213,7 +223,47 @@ class SeesaaWiki(PartialMetadataAgent):
                     if "/d/" in href:
                         return self.resolve_page_name(href, depth + 1)
 
-        return self.extract_page_name(soup)
+        name = self.extract_page_name(soup)
+        reading = self.extract_reading(soup, name)
+        if name and reading:
+            self.reading_cache[name] = reading
+        return name
+
+    # Hiragana reading printed in parentheses after the name, e.g. the reading
+    # part of "<name>(<reading>)". Char classes below, in order: a full/half
+    # open paren, then hiragana (u3041-u3096) plus the long-vowel mark (u30fc),
+    # the middle dot (u30fb) and spaces (incl. the ideographic space u3000),
+    # then a full/half close paren.
+    READING_RE = (
+        u"[（(]\\s*"
+        u"([ぁ-ゖ][ぁ-ゖー・　 ]*)"
+        u"\\s*[）)]"
+    )
+
+    @classmethod
+    def extract_reading(cls, soup, page_name):
+        """Return the hiragana reading printed after the actress name.
+
+        Actress pages introduce the name as `name(yomigana)`, i.e. the kanji name
+        followed by its hiragana reading in parentheses. This returns that
+        reading, or `None` when it is absent.
+
+        Args:
+            soup: The parsed actress page.
+            page_name (str): The resolved page name used to anchor the match.
+
+        Returns:
+            str or None: The hiragana reading, or `None`.
+        """
+        if not page_name:
+            return None
+        scope = soup.find("div", class_="user-area") or soup
+        text = scope.get_text()
+        match = re.search(re.escape(page_name) + u"\\s*" + cls.READING_RE, text)
+        if not match:
+            return None
+        reading = re.sub(u"[　\\s]+", u" ", match.group(1)).strip()
+        return reading or None
 
     @staticmethod
     def extract_page_name(soup):

@@ -164,6 +164,13 @@ class CaribbeanPr(SearchAgent, StudioAgent):
                 a.text.strip() for a in tags_spec.select("a.spec-item")
             )
 
+        # Series
+        series_spec = self.find_spec(soup, u"シリーズ")
+        if series_spec:
+            link = series_spec.select_one("a")
+            if link:
+                metadata.series = link.text.strip()
+
         # Posters
         poster_urls = [
             "{0}/moviepages/{1}/images/main_s.jpg".format(

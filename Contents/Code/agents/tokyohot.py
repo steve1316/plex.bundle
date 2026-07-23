@@ -117,6 +117,7 @@ class TokyoHot(SearchAgent, StudioAgent):
             link = dd_label.select_one("a")
             if link:
                 studio = link.text.strip()
+                metadata.labels = set([studio])
         metadata.studio = studio
 
         if main:
@@ -178,14 +179,14 @@ class TokyoHot(SearchAgent, StudioAgent):
         if genres:
             metadata.genres = set(genres)
 
-        # # Series
-        # dd = self.find_info(soup, u"シリーズ")
-        # if dd:
-        #     for a in dd.select("a"):
-        #         text = a.text.strip()
-        #         if text:
-        #             metadata.series = text
-        #             break
+        # Series
+        dd = self.find_info(soup, u"シリーズ")
+        if dd:
+            for a in dd.select("a"):
+                text = a.text.strip()
+                if text:
+                    metadata.series = text
+                    break
 
         # Posters
         metadata.posters = [Resource(

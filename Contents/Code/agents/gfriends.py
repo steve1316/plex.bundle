@@ -14,7 +14,9 @@ FILETREE_URL = 'https://raw.githubusercontent.com/xinxin8816/gfriends/master/Fil
 
 class GFriends(AvatarAgent):
     name = "Gfriends"
-    weight = -300
+    # Runs before Warashi: an exact kanji-name match is more reliable than
+    # Warashi's fuzzy name search.
+    weight = -200
 
     def __init__(self, *args, **kwargs):
         super(GFriends, self).__init__(*args, **kwargs)

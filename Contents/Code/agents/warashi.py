@@ -12,7 +12,9 @@ BASE_URL = "https://warashi-asian-pornstars.fr"
 
 class WarashiPornstars(AvatarAgent):
     name = "WarashiPornstars"
-    weight = -200
+    # Runs after Gfriends (fuzzy fallback) but before Translate, so it searches
+    # by the Japanese name rather than the LLM's romanization.
+    weight = -300
 
     def __init__(self, *args, **kwargs):
         super(WarashiPornstars, self).__init__(*args, **kwargs)

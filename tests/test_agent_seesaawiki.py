@@ -189,5 +189,72 @@ class TestActressNameCache(BaseTestCase):
         self.assertEqual(result, u"かなで自由")
 
 
+# ---------------------------------------------------------------------------
+# Reading extraction tests
+# ---------------------------------------------------------------------------
+
+from bs4 import BeautifulSoup  # noqa: E402
+
+from agents.types import Metadata, Person  # noqa: E402
+
+
+class TestExtractReading(BaseTestCase):
+    """Verify :meth:`SeesaaWiki.extract_reading` parses the parenthesised reading."""
+
+    def setUp(self):
+        super(TestExtractReading, self).setUp()
+        self.update_prefs(seesaawiki_enabled=True)
+        self.agent = SeesaaWiki(Prefs)
+
+    def test_reading_from_parenthesized_yomigana(self):
+        html = (u'<div class="user-area"><h2>原紗央莉（はらさおり）</h2>'
+                u'<p>body text</p></div>')
+        soup = BeautifulSoup(html, "html.parser")
+        self.assertEqual(u"はらさおり",
+                         self.agent.extract_reading(soup, u"原紗央莉"))
+
+    def test_reading_absent(self):
+        html = u'<div class="user-area"><p>no reading here</p></div>'
+        soup = BeautifulSoup(html, "html.parser")
+        self.assertIsNone(self.agent.extract_reading(soup, u"原紗央莉"))
+
+    def test_reading_none_page_name(self):
+        soup = BeautifulSoup(u"<div></div>", "html.parser")
+        self.assertIsNone(self.agent.extract_reading(soup, None))
+
+
+class TestPartialUpdateReading(BaseTestCase):
+    """Verify :meth:`SeesaaWiki.partial_update` attaches the wiki reading."""
+
+    def setUp(self):
+        super(TestPartialUpdateReading, self).setUp()
+        self.update_prefs(seesaawiki_enabled=True)
+        self.agent = SeesaaWiki(Prefs)
+
+    def test_attaches_reading_to_actress(self):
+        meta = Metadata()
+        meta.actresses = [Person(u"原紗央莉")]
+        self.agent.reading_cache = {u"原紗央莉": u"はらさおり"}
+        with mock.patch.object(self.agent, "get_actress_name",
+                               side_effect=lambda name: name):
+            self.agent.partial_update(u"STAR-193", meta, "ja")
+
+        self.assertEqual(1, len(meta.actresses))
+        self.assertEqual(u"原紗央莉", meta.actresses[0])
+        self.assertEqual(u"はらさおり", meta.actresses[0].reading)
+
+    def test_existing_reading_is_not_overwritten(self):
+        actress = Person(u"原紗央莉")
+        actress.reading = u"はら さおり"  # e.g. supplied by AVBase ruby
+        meta = Metadata()
+        meta.actresses = [actress]
+        self.agent.reading_cache = {u"原紗央莉": u"はらさおり"}
+        with mock.patch.object(self.agent, "get_actress_name",
+                               side_effect=lambda name: name):
+            self.agent.partial_update(u"STAR-193", meta, "ja")
+
+        self.assertEqual(u"はら さおり", meta.actresses[0].reading)
+
+
 if __name__ == "__main__":
     unittest.main()
