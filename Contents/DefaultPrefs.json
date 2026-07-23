@@ -6,6 +6,12 @@
         "default": true
     },
     {
+        "id": "geo_proxy",
+        "label": "Geo proxy for DMM/MGStage (e.g. http://user:pass@jp-node:18080)",
+        "type": "text",
+        "default": ""
+    },
+    {
         "id": "proxy",
         "label": "HTTP Proxy (e.g. http://127.0.0.1:7890)",
         "type": "text",
@@ -36,6 +42,24 @@
         "default": ""
     },
     {
+        "id": "avbase_enabled",
+        "label": "Enable AVBase agent",
+        "type": "bool",
+        "default": true
+    },
+    {
+        "id": "duga_enabled",
+        "label": "Enable Duga full-description backfill",
+        "type": "bool",
+        "default": true
+    },
+    {
+        "id": "buena_enabled",
+        "label": "Enable BUENA agent",
+        "type": "bool",
+        "default": true
+    },
+    {
         "id": "dmm_enabled",
         "label": "Enable DMM agent",
         "type": "bool",
@@ -64,5 +88,23 @@
         "label": "Enable WarashiPornStars agent",
         "type": "bool",
         "default": true
+    },
+    {
+        "id": "translate_enabled",
+        "label": "Enable translation (requires Ollama)",
+        "type": "bool",
+        "default": false
+    },
+    {
+        "id": "ollama_url",
+        "label": "Ollama URL (e.g. http://localhost:11434)",
+        "type": "text",
+        "default": "http://localhost:11434"
+    },
+    {
+        "id": "ollama_model",
+        "label": "Ollama model for translation",
+        "type": "text",
+        "default": "gemma3:12b"
     }
 ]
