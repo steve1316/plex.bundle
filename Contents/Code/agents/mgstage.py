@@ -23,6 +23,17 @@ class MGStage(SearchAgent, MetadataAgent):
 
     name = "MGStage"
     weight = 500
+    # MGStage is geo-blocked and fetched via plain requests, so it routes through `geo_proxy`.
+    geo_restricted = True
+
+    def should_contribute_to(self, metadata, attribute, new_value):
+        # MGStage carries the full description. Let it replace a shorter summary (e.g. AVBase's truncated teaser).
+        if attribute == "summary" and new_value:
+            current = getattr(metadata, attribute)
+            if not current or len(new_value) > len(current):
+                return True
+        return super(MGStage, self).should_contribute_to(
+            metadata, attribute, new_value)
 
     def create_session(self):
         """Return a new session with the MGStage age-check cookie pre-set."""
@@ -95,20 +106,23 @@ class MGStage(SearchAgent, MetadataAgent):
         html = self.fetch(agent_id, lang)
         soup = BeautifulSoup(html, "html.parser")
 
-        # Extract sample UUID from the first button_sample link.
-        sample_uuid = None
-        btn = soup.select_one("a.button_sample")
-        if btn:
-            href = btn.get("href", "")
-            m = re.search(r"/sampleplayer/sampleplayer\.html/([^/?]+)", href)
-            if m:
-                sample_uuid = m.group(1)
+        # Trailer. Skip for geo-restricted sources: resolving the sample spends limited proxy traffic and the sample
+        # video lives on a geo-blocked host that cannot be played direct anyway.
+        trailer_url = None
+        if not self.geo_restricted:
+            # Extract sample UUID from the first button_sample link.
+            sample_uuid = None
+            btn = soup.select_one("a.button_sample")
+            if btn:
+                href = btn.get("href", "")
+                m = re.search(r"/sampleplayer/sampleplayer\.html/([^/?]+)", href)
+                if m:
+                    sample_uuid = m.group(1)
 
-        # Attempt to resolve sample trailer URL.
-        trailer_url = self.resolve_trailer(
-            self.session, sample_uuid,
-            DETAIL_URL.format(product_id=agent_id),
-        )
+            trailer_url = self.resolve_trailer(
+                self.session, sample_uuid,
+                DETAIL_URL.format(product_id=agent_id),
+            )
 
         metadata = Metadata()
         metadata.code_group = get_code_group(video_code)
@@ -189,6 +203,16 @@ class MGStage(SearchAgent, MetadataAgent):
         if value:
             metadata.series = value
 
+        # Label
+        value = self.find_table_value(soup, u"レーベル")
+        if value:
+            metadata.labels = set([value])
+
+        # Director
+        value = self.find_table_value(soup, u"監督")
+        if value and value.strip(u"- "):
+            metadata.directors = [Person(value)]
+
         # Art (large background image - pb_e_*.jpg)
         art_url = None
         el = soup.select_one("#EnlargeImage")
@@ -197,18 +221,18 @@ class MGStage(SearchAgent, MetadataAgent):
         if el:
             art_url = el.get("href", "") or None
 
-        # Poster (small cover image - pf_o1_*.jpg)
-        poster_url = None
+        # Small cover image - pf_o1_*.jpg
+        small_poster = None
         img = soup.select_one(".detail_photo img.enlarge_image")
         if not img:
             img = soup.select_one(
                 '.detail_photo img[src*="image.mgstage.com"]'
             )
         if img:
-            poster_url = img.get("src", "") or None
-        if not poster_url and art_url:
-            poster_url = art_url
+            small_poster = img.get("src", "") or None
 
+        # Prefer the large pb_e cover as the poster - it is far higher resolution than the small pf_o1 thumbnail. Fall back to the small cover when the large one is unavailable.
+        poster_url = art_url or small_poster
         if poster_url:
             metadata.posters = [Resource(poster_url)]
         if art_url:

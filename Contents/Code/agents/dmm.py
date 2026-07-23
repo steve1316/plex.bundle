@@ -47,6 +47,17 @@ class DMM(SearchAgent, MetadataAgent):
 
     name = "DMM"
     weight = 800
+    # DMM is geo-blocked and fetched via plain requests, so it routes through `geo_proxy`.
+    geo_restricted = True
+
+    def should_contribute_to(self, metadata, attribute, new_value):
+        # DMM carries the full description. Let it replace a shorter summary (e.g. AVBase's truncated teaser).
+        if attribute == "summary" and new_value:
+            current = getattr(metadata, attribute)
+            if not current or len(new_value) > len(current):
+                return True
+        return super(DMM, self).should_contribute_to(
+            metadata, attribute, new_value)
 
     def create_session(self):
         """Return a new session with the DMM age-check cookie pre-set."""
@@ -200,10 +211,20 @@ class DMM(SearchAgent, MetadataAgent):
         # Actresses
         links = self.find_table_links(soup, u"出演者")
         if links:
-            metadata.actresses = [
-                Person(re.sub(ur"\uff08[^\uff09]*\uff09", u"", a.get_text(strip=True)).strip())
-                for a in links if a.get_text(strip=True)
-            ]
+            actresses = []
+            for a in links:
+                text = a.get_text(strip=True)
+                if not text:
+                    continue
+                # Keep the kanji as the name, capture the parenthesised reading.
+                name = re.sub(ur"\uff08[^\uff09]*\uff09", u"", text).strip()
+                person = Person(name or text)
+                rm = re.search(ur"\uff08([^\uff09]*)\uff09", text)
+                if rm and rm.group(1).strip():
+                    person.reading = rm.group(1).strip()
+                actresses.append(person)
+            if actresses:
+                metadata.actresses = actresses
 
         # Directors
         links = self.find_table_links(soup, u"監督")
@@ -228,27 +249,41 @@ class DMM(SearchAgent, MetadataAgent):
         img = soup.find("img", src=lambda s: s and "pics.dmm.co.jp" in s)
         if img:
             src = img.get("src", "")
-            art_url = re.sub(
-                r"(?<=/)([^/]+)(?:ps|pt)\.jpg$", r"\1pl.jpg", src)
-            art_url = Resource(art_url)
-            art_url.score = 55
-            poster_url = re.sub(
-                r"(?<=/)([^/]+)(?:pl|pt)\.jpg$", r"\1ps.jpg", src)
-            poster_url = Resource(poster_url)
-            poster_url.score = 55
-            metadata.posters = [poster_url]
-            metadata.art = [art_url]
+            large = re.sub(r"(?<=/)([^/]+)(?:ps|pt)\.jpg$", r"\1pl.jpg", src)
+            small = re.sub(r"(?<=/)([^/]+)(?:pl|pt)\.jpg$", r"\1ps.jpg", src)
         else:
-            metadata.posters = [Resource(self.image_url(cid, "ps", pattern))]
-            metadata.art = [Resource(self.image_url(cid, "pl", pattern))]
+            large = self.image_url(cid, "pl", pattern)
+            small = self.image_url(cid, "ps", pattern)
 
-        # Trailer
-        trailer_url = self.resolve_trailer(soup)
-        if trailer_url and self.validate_resource(trailer_url, "video/"):
-            trailer = Resource(trailer_url)
-            trailer.thumb = self.image_url(cid, "pl", pattern)
-            trailer.score = 30  # 403 errors are common
-            metadata.trailers = [trailer]
+        # Prefer the large pl.jpg as the poster - it is higher resolution than the small ps.jpg thumbnail, and it doubles as the background art. Fall back to ps.jpg if the large cover is unavailable.
+        art_url = Resource(large)
+        art_url.score = 55
+        metadata.art = [art_url]
+        if self.validate_resource(large, "image/"):
+            poster_url = Resource(large)
+        else:
+            poster_url = Resource(small)
+        poster_url.score = 55
+        metadata.posters = [poster_url]
+
+        # Sample images (per-scene stills) as extra low-priority background art.
+        sample_block = soup.find(id="sample-image-block")
+        if sample_block:
+            for a in sample_block.find_all(
+                    "a", href=lambda h: h and "pics.dmm.co.jp" in h):
+                sample = Resource(a["href"])
+                sample.score = 30
+                metadata.art.append(sample)
+
+        # Trailer. Skip for geo-restricted sources: the sample video lives on a geo-blocked CDN, so it costs limited
+        # proxy traffic to validate and cannot be played direct anyway.
+        if not self.geo_restricted:
+            trailer_url = self.resolve_trailer(soup)
+            if trailer_url and self.validate_resource(trailer_url, "video/"):
+                trailer = Resource(trailer_url)
+                trailer.thumb = self.image_url(cid, "pl", pattern)
+                trailer.score = 30  # 403 errors are common
+                metadata.trailers = [trailer]
 
         return metadata
 

@@ -93,7 +93,7 @@ class TestDMMAgent(AgentTestCase):
         self.assertGenresInclude([u"巨乳", u"SM", u"単体作品", u"縛り・緊縛"], metadata)
         self.assertLabelsInclude([u"蛇縛"], metadata)
         self.assertPostersInclude(
-            [u"https://pics.dmm.co.jp/mono/movie/adult/jbd226/jbd226ps.jpg"], metadata)
+            [u"https://pics.dmm.co.jp/mono/movie/adult/jbd226/jbd226pl.jpg"], metadata)
         self.assertArtInclude(
             [u"https://pics.dmm.co.jp/mono/movie/adult/jbd226/jbd226pl.jpg"], metadata)
         self.assertTrailersInclude(
@@ -108,7 +108,7 @@ class TestDMMAgent(AgentTestCase):
         self.assertTitleEquals(
             u"XVSR-316 大槻ひびきとイチャLOVE中出しデート", metadata)
         self.assertPostersInclude(
-            [u"https://pics.dmm.co.jp/mono/movie/adult/xvsr316so/xvsr316sops.jpg"], metadata)
+            [u"https://pics.dmm.co.jp/mono/movie/adult/xvsr316so/xvsr316sopl.jpg"], metadata)
         self.assertArtInclude(
             [u"https://pics.dmm.co.jp/mono/movie/adult/xvsr316so/xvsr316sopl.jpg"], metadata)
 
@@ -124,7 +124,7 @@ class TestDMMAgent(AgentTestCase):
         self.assertLabelsInclude([u"強く気高い美女たち"], metadata)
         self.assertGenresInclude([u"辱め", u"淫乱・ハード系"], metadata)
         self.assertPostersInclude(
-            [u"https://pics.dmm.co.jp/mono/movie/4prtd033/4prtd033ps.jpg"], metadata)
+            [u"https://pics.dmm.co.jp/mono/movie/4prtd033/4prtd033pl.jpg"], metadata)
         self.assertArtInclude(
             [u"https://pics.dmm.co.jp/mono/movie/4prtd033/4prtd033pl.jpg"], metadata)
         self.assertTrailersInclude(

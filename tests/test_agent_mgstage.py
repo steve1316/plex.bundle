@@ -63,7 +63,7 @@ class TestMGStageAgent(AgentTestCase):
         self.assertSeriesIs(None, metadata)
         self.assertDurationExists(metadata)
         self.assertPostersInclude(
-            [u"https://image.mgstage.com/images/prestige/aka/007/pf_o1_aka-007.jpg"], metadata)
+            [u"https://image.mgstage.com/images/prestige/aka/007/pb_e_aka-007.jpg"], metadata)
         self.assertArtInclude(
             [u"https://image.mgstage.com/images/prestige/aka/007/pb_e_aka-007.jpg"], metadata)
         self.assertTrailersInclude(
