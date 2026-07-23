@@ -4,6 +4,8 @@ from .base import (AccessRestrictedError, BaseAgent, MetadataAgent,
                    PartialMetadataAgent, SearchAgent)
 from .types import Metadata
 
+from .avbase import AVBase  # noqa: E402
+from .buena import Buena  # noqa: E402
 from .caribbean import Caribbean  # noqa: E402
 from .caribpr import CaribbeanPr  # noqa: E402
 from .dmm import DMM  # noqa: E402
@@ -14,4 +16,5 @@ from .mgstage import MGStage  # noqa: E402
 from .pondo import Pondo  # noqa: E402
 from .seesaawiki import SeesaaWiki  # noqa: E402
 from .tokyohot import TokyoHot  # noqa: E402
+from .translate import Translate  # noqa: E402
 from .warashi import WarashiPornstars  # noqa: E402
