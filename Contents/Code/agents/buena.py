@@ -7,7 +7,7 @@ from urllib import unquote
 from bs4 import BeautifulSoup
 
 from .base import AccessRestrictedError, MetadataAgent, SearchAgent
-from .getchu import extract_dl_id, extract_soft_id
+from .getchu import extract_dl_id, extract_soft_id, fetch_dl_item, fetch_soft
 from .types import Metadata, Person, Resource, SearchItem
 from .utils import get_code_group
 
@@ -219,7 +219,64 @@ class Buena(SearchAgent, MetadataAgent):
         if art:
             metadata.art = art
 
+        if self.prefs["getchu_enabled"]:
+            self.hydrate_from_getchu(entry, metadata)
+
         return metadata
+
+    def hydrate_from_getchu(self, entry, metadata):
+        """Fill the summary, release date, genres, duration and covers from the entry's Getchu pages.
+
+        konodare has no synopsis or release date for BUENA entries. A failed fetch only logs a warning, so the konodare metadata is kept.
+
+        Args:
+            entry (Entry): The catalog entry carrying the Getchu ids.
+            metadata (Metadata): The metadata to fill in place.
+        """
+        dl_info = self.fetch_getchu_page(fetch_dl_item, entry.dlgetchu_id, entry.code)
+        soft_info = self.fetch_getchu_page(fetch_soft, entry.getchu_id, entry.code)
+
+        # DL.Getchu has the full synopsis. The Getchu product page has the original package release date.
+        for info in [dl_info, soft_info]:
+            if info.get("description") and not metadata.summary:
+                metadata.summary = info["description"]
+        for info in [soft_info, dl_info]:
+            if info.get("release_date") and not metadata.release_date:
+                metadata.release_date = info["release_date"]
+        for genre in dl_info.get("genres") or []:
+            metadata.genres.add(genre)
+        if soft_info.get("duration_min") and not metadata.duration:
+            metadata.duration = soft_info["duration_min"] * 60 * 1000
+
+        # The Getchu package is a square disc label and the DL.Getchu top image is a wide montage that crops badly, so both rank below FANZA.
+        posters = list(metadata.posters or [])
+        for info, score in [(soft_info, 45), (dl_info, 30)]:
+            if info.get("cover_url"):
+                poster = Resource(info["cover_url"])
+                poster.score = score
+                posters.append(poster)
+        if posters:
+            posters.sort(key=lambda r: r.score, reverse=True)
+            metadata.posters = posters
+
+    def fetch_getchu_page(self, fetch, item_id, code):
+        """Fetch one Getchu page, returning an empty dict when there is no id or the fetch fails.
+
+        Args:
+            fetch: `fetch_soft()` or `fetch_dl_item()`.
+            item_id (str): The Getchu product or DL.Getchu item id, or None.
+            code (str): The entry code, used in the warning.
+
+        Returns:
+            dict: The parsed page fields, or an empty dict.
+        """
+        if not item_id:
+            return {}
+        try:
+            return fetch(self.session, item_id, self.raise_for_status)
+        except Exception as e:
+            self.logger.warning("Getchu fetch %s for %s failed: %s", item_id, code, e)
+            return {}
 
     # //////////////////////////////////////////////////////////////////////////////////////////////////
     # //////////////////////////////////////////////////////////////////////////////////////////////////

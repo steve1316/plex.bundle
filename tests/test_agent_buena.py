@@ -93,6 +93,23 @@ class TestBuenaAgent(AgentTestCase):
             metadata.art[0],
             [u"https://pics.dmm.co.jp/digital/video/prin00042/prin00042pl.jpg",
              u"https://awsimgsrc.dmm.co.jp/pics_dig/digital/amateur/zarj070/zarj070jp.jpg"])
+        # Getchu adds the synopsis, the package release date and its cover
+        self.assertTrue(metadata.summary)
+        self.assertReleaseDateIs(datetime.datetime(2020, 10, 13), metadata)
+        self.assertIn(u"https://www.getchu.com/brandnew/1108622/c1108622package.jpg", metadata.posters)
+
+    def test_metadata_getchu_disabled(self):
+        self.update_prefs(getchu_enabled=False)
+        metadata = self.agent.get_metadata(u"BUENA-075", u"BUENA-075", "ja")
+        self.assertIsNone(metadata.release_date)
+        self.assertNotIn(u"https://www.getchu.com/brandnew/1108622/c1108622package.jpg", metadata.posters)
+
+    def test_metadata_dl_getchu_entry(self):
+        # BUENA-002 links only to DL.Getchu, which has the synopsis, delivery date and genre tags
+        metadata = self.agent.get_metadata(u"BUENA-002", u"BUENA-002", "ja")
+        self.assertTrue(metadata.summary.startswith(u"圧倒的うぶっ娘"))
+        self.assertReleaseDateIs(datetime.datetime(2021, 11, 25), metadata)
+        self.assertGenresInclude([u"コスプレ", u"お嬢様"], metadata)
 
     def test_metadata_pow_label_studio(self):
         # POW-labelled releases report POW as the studio
@@ -132,6 +149,8 @@ class TestBuenaAgent(AgentTestCase):
         self.assertStudioIs(u"POW", metadata)
         self.assertActressesInclude([u"田中ねね"], metadata)
         self.assertReleaseDateIs(datetime.datetime(2021, 2, 17), metadata)
+        self.assertTrue(metadata.summary)
+        self.assertGenresInclude([u"ケモミミ"], metadata)
 
 
 if __name__ == "__main__":

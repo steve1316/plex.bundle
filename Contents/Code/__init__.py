@@ -36,6 +36,9 @@ MAX_DUPLICATE_DIFFERENCE = 15
 MAX_FOLDER_TITLE_LENGTH = 100
 MAX_FOLDER_NAME_BYTES = 240
 
+# Getchu refuses image requests (403) that do not come from its own pages.
+GETCHU_IMAGE_REFERER = "https://www.getchu.com/"
+
 
 def Start():
     Log.Info("Starting JAV Agent version %s", version)
@@ -524,7 +527,7 @@ class JAVAgent(Agent.Movies):
             int: The Content-Length in bytes, or -1 when the request fails or the resource is not an image.
         """
         try:
-            resp = requests.head(url, allow_redirects=True)
+            resp = requests.head(url, allow_redirects=True, headers=image_headers(url))
             resp.raise_for_status()
             if not resp.headers.get("Content-Type", "").startswith("image/"):
                 return -1
@@ -567,8 +570,9 @@ class JAVAgent(Agent.Movies):
             tuple[int, int]: The (width, height), or None when it cannot be determined.
         """
         try:
-            resp = requests.get(
-                url, headers={"Range": "bytes=0-65535"}, timeout=15)
+            headers = image_headers(url)
+            headers["Range"] = "bytes=0-65535"
+            resp = requests.get(url, headers=headers, timeout=15)
             resp.raise_for_status()
             return parse_jpeg_dimensions(resp.content)
         except Exception as e:
@@ -684,7 +688,7 @@ class JAVAgent(Agent.Movies):
             The raw image bytes, or None when the download fails.
         """
         try:
-            resp = requests.get(url)
+            resp = requests.get(url, headers=image_headers(url))
             resp.raise_for_status()
             return resp.content
         except Exception as e:
@@ -817,6 +821,20 @@ def mask_proxy_url(url):
     else:
         prefix, rest = "", url
     return prefix + "***@" + rest.split("@", 1)[1]
+
+
+def image_headers(url):
+    """Return the request headers needed to fetch the image at `url`.
+
+    Args:
+        url (str): The image URL.
+
+    Returns:
+        dict: The headers to send, empty for most hosts.
+    """
+    if urlparse(url).netloc.endswith("getchu.com"):
+        return {"Referer": GETCHU_IMAGE_REFERER}
+    return {}
 
 
 def log_prefs():
