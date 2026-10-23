@@ -913,7 +913,8 @@ def clean_folder_text(text):
     if not text:
         return u""
     text = re.sub(r"[/\\]", u"-", text)
-    text = re.sub(r'[:*?"<>|\x00-\x1f]', u"", text)
+    # Also drop the curly quotes and Japanese brackets that translated titles often keep.
+    text = re.sub(u'[:*?"<>|\x00-\x1f\u201c\u201d\u300c\u300d\u300e\u300f]', u"", text)
     return u" ".join(text.split())
 
 

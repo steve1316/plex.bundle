@@ -711,6 +711,10 @@ class TestBuildFolderName(BaseTestCase):
         meta = self._metadata(u'DANDY-149 Hygienist/Nurse: Why? "Yes" <3 a|b\\c*')
         self.assertEqual(u"DANDY-149 [DANDY] - Hygienist-Nurse Why Yes 3 ab-c (2009)", _main.build_folder_name(meta, "ja", u"DANDY-149"))
 
+    def test_quotes_and_brackets_removed(self):
+        meta = self._metadata(u"DANDY-149 \u201cThe Temptation\u201d \u300cVol.1\u300d \u300e2\u300f")
+        self.assertEqual(u"DANDY-149 [DANDY] - The Temptation Vol.1 2 (2009)", _main.build_folder_name(meta, "ja", u"DANDY-149"))
+
     def test_long_title_cut_with_ellipsis(self):
         name = _main.build_folder_name(self._metadata(u"DANDY-149 " + u"word " * 40), "ja", u"DANDY-149")
         title = name[len(u"DANDY-149 [DANDY] - "):-len(u" (2009)")]
