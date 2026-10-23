@@ -19,7 +19,7 @@
     },
     {
         "id": "rename_existing_folders",
-        "label": "Also rename folders that already have a title when the new 'CODE [Studio] - Title (Year)' name differs",
+        "label": "Also fix the code spelling and add a missing year in folders that already have a title (their title and studio are kept)",
         "type": "bool",
         "default": false
     },

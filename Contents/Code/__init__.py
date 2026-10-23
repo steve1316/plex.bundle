@@ -36,6 +36,9 @@ MAX_DUPLICATE_DIFFERENCE = 15
 MAX_FOLDER_TITLE_LENGTH = 100
 MAX_FOLDER_NAME_BYTES = 240
 
+# Splits a folder name like "DANDY-149 [DANDY] - The Temptation (2009)" into its code, the rest, and the year.
+FOLDER_NAME_RE = re.compile(r"^(\S+)(.*?)( \(\d{4}\))?$", re.UNICODE)
+
 # Getchu refuses image requests (403) that do not come from its own pages.
 GETCHU_IMAGE_REFERER = "https://www.getchu.com/"
 
@@ -461,8 +464,9 @@ class JAVAgent(Agent.Movies):
     def rename_folder(self, media_path, video_code, metadata, lang):
         """Rename the video's folder to `CODE [Studio] - Title (Year)`.
 
-        A folder named only by the video code is renamed when `rename_bare_folders` is on. A folder that already has a title is renamed
-        only when `rename_existing_folders` is on, since a re-translated title then renames it again.
+        A folder named only by the video code is renamed when `rename_bare_folders` is on. A folder that already has a title keeps its title
+        and studio, since translations and sources differ between refreshes and every rename makes Plex re-create the item. With
+        `rename_existing_folders` on, only its code spelling and a missing year are fixed.
 
         Args:
             media_path (str): Path of the video file.
@@ -479,9 +483,11 @@ class JAVAgent(Agent.Movies):
         if is_bare_folder(folder, video_code):
             if not Prefs["rename_bare_folders"]:
                 return
-        elif not Prefs["rename_existing_folders"]:
+            name = build_folder_name(metadata, lang, video_code, code)
+        elif Prefs["rename_existing_folders"]:
+            name = update_folder_name(folder, metadata, code)
+        else:
             return
-        name = build_folder_name(metadata, lang, video_code, code)
         if not name or name == os.path.basename(folder):
             return
         target = os.path.join(os.path.dirname(folder), name)
@@ -1043,6 +1049,26 @@ def build_folder_name(metadata, lang, video_code, code=None):
         title = title[:-4].rstrip() + u"..."
     # Windows does not allow a name ending in a dot or space.
     return (prefix + title + suffix).rstrip(u". ")
+
+
+def update_folder_name(folder, metadata, code):
+    """Return the name of an already named folder with its code respelled and a missing year added, keeping its title and studio.
+
+    Args:
+        folder (str): The folder path, e.g. "/Library/r18 jav/ebod889 [E-body] - Suddenly".
+        metadata (Metadata): The merged metadata, used only for the release year.
+        code (str): The code to start the name with, from `folder_code()`.
+
+    Returns:
+        str: The updated folder name, e.g. "EBOD-889 [E-body] - Suddenly (2022)".
+    """
+    match = FOLDER_NAME_RE.match(os.path.basename(folder))
+    if not match:
+        return None
+    year = match.group(3)
+    if not year and metadata.release_date:
+        year = u" ({0})".format(metadata.release_date.year)
+    return code + match.group(2) + (year or u"")
 
 
 def nfo_text(value):

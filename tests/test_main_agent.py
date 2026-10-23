@@ -794,11 +794,17 @@ class TestRenameFolder(BaseTestCase):
         self._rename(agent, folder=u"/Library/r18 jav/DANDY-149 [Dandy] - Old Title (2009)")
         self.assertEqual([], self.moves)
 
-    def test_renames_named_folder_when_pref_on(self):
+    def test_existing_pref_keeps_title_and_studio(self):
         self.update_prefs(rename_existing_folders=True)
         agent = self._agent()
         self._rename(agent, folder=u"/Library/r18 jav/DANDY-149 [Dandy] - Old Title (2009)")
-        self.assertEqual([(u"/Library/r18 jav/DANDY-149 [Dandy] - Old Title (2009)", self.TARGET)], self.moves)
+        self.assertEqual([], self.moves)
+
+    def test_existing_pref_fixes_code_and_missing_year(self):
+        self.update_prefs(rename_existing_folders=True)
+        agent = self._agent()
+        self._rename(agent, folder=u"/Library/r18 jav/dandy149 [Dandy] - Old Title")
+        self.assertEqual([(u"/Library/r18 jav/dandy149 [Dandy] - Old Title", u"/Library/r18 jav/DANDY-149 [Dandy] - Old Title (2009)")], self.moves)
 
     def test_existing_pref_skips_folder_already_named(self):
         self.update_prefs(rename_existing_folders=True)
