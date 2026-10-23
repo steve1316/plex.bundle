@@ -7,23 +7,46 @@ from urllib import unquote
 from bs4 import BeautifulSoup
 
 from .base import AccessRestrictedError, MetadataAgent, SearchAgent
+from .getchu import extract_dl_id, extract_soft_id
 from .types import Metadata, Person, Resource, SearchItem
 from .utils import get_code_group
 
 
-# konodare.wew.jp catalogs two related makers on separate pages:
-#   /buena/ - cosplay releases (buenaNNN) as `table.product-list` entries, each
-#             with actress, cosplay character, source series and cross-ref codes.
-#   /pow/   - the POW amateur line (POW-NNN) as one row per release, with title,
-#             release date, duration, actress and cover. Richer than /buena/.
-# The older buena001-075 (/asaichi/) and the buenap compilation pages use yet
-# other layouts and are not indexed here.
+# konodare.wew.jp catalogs BUENA and its sister lines on separate pages:
+#   /buena/   - cosplay releases (buenaNNN) as `table.product-list` entries, paginated. Page 2 holds the buenaS / buenaTS
+#               specials and the buenap (たかまり) entries, which are the POW releases.
+#   /asaichi/ - the older buena001-074 (朝一番) as one big table.
+#   /pow/     - the POW amateur line (POW-NNN) as one row per release, with title, release date, duration, actress and cover.
+# The /buena/ and /asaichi/ tables are runs of a header row (actress / cosplay) followed by code rows and their media rows.
 BUENA_URL = u"https://konodare.wew.jp/buena/"
+ASAICHI_URL = u"https://konodare.wew.jp/asaichi/"
 POW_URL = u"https://konodare.wew.jp/pow/"
 
-# Matches any supported code (buena/pow/zarj/prin) with optional separators and
-# zero-padding, e.g. "buena075", "BUENA-075", "prin-042", "zarj070", "pow046".
-CODE_RE = re.compile(r"(?i)(buena|pow|zarj|prin)[\s_\-]*0*(\d+)([a-z]?)")
+# Upper bound on followed `/buena/` pages, in case the pagination links loop.
+MAX_BUENA_PAGES = 5
+
+# Matches any supported code with optional separators and zero-padding, e.g. "buena075", "BUENA-075", "buenaS002",
+# "asaichi001", "prin-042", "zarj070", "pow046".
+CODE_RE = re.compile(r"(?i)(buena(?:ts|s|p)?|asaichi|pow|zarj|prin)[\s_\-]*0*(\d+)([a-z]?)")
+
+# The primary code that starts an entry's code row, e.g. "buena001", "buenaTS003" or "buenap040". Variants like "buena075b" do not match.
+PRIMARY_CODE_RE = re.compile(r"(?i)^(buena(?:ts|s|p)?)0*(\d+)$")
+
+# Any code-like token in a catalog cell, e.g. "asaichi001", "ZARJ070" or "PRIN-042".
+CODE_TOKEN_RE = re.compile(r"^[A-Za-z]+-?\d+[A-Za-z]?$")
+
+# A POW code token, e.g. "POW023" or "pow-040".
+POW_TOKEN_RE = re.compile(r"(?i)^pow-?\d+$")
+
+# A FANZA product link (after unquoting the affiliate `lurl`), on either the new or the old site layout.
+FANZA_LINK_RE = re.compile(r"dmm\.co\.jp/(?:(amateur|av)/content/\?id=|digital/(videoc|videoa)/-/detail/=/cid=)([a-z0-9_]+)")
+
+# FANZA cover images on either image host (pics.dmm.co.jp or awsimgsrc.dmm.co.jp).
+FANZA_AV_IMG_RE = re.compile(r"/digital/video/([a-z0-9_]+)/\1(?:ps|pt|pl)\.jpg$")
+FANZA_AMATEUR_IMG_RE = re.compile(r"^(.*/digital/amateur/([a-z0-9_]+)/\2)j[a-z]?\.jpg$")
+
+# Placeholders konodare uses for an empty cell or an unknown actress.
+DASHES = (u"-", u"–", u"—", u"−", u"―")
 
 
 def normalize_code(code):
@@ -47,22 +70,39 @@ def normalize_code(code):
     return s
 
 
+def cid_to_code(cid):
+    """Turn a FANZA content id into a display code, e.g. "prin00042" into "PRIN-042".
+
+    Args:
+        cid (str): The FANZA content id, e.g. `57eiki00078` or `zarj070`.
+
+    Returns:
+        str: The display code, or the upper-cased cid when it has no letters + number shape.
+    """
+    m = re.match(r"^\d*([a-z]+)0*(\d+)([a-z]?)$", cid.lower())
+    if not m:
+        return cid.upper()
+    return u"%s-%03d%s" % (m.group(1).upper(), int(m.group(2)), m.group(3).upper())
+
+
 class Entry(object):
     """A single parsed catalog entry (BUENA cosplay or POW amateur)."""
 
     def __init__(self):
         self.code = None            # canonical id, e.g. "BUENA-075" or "POW-046"
-        self.title_text = None      # plain title (POW entries); BUENA builds from char/series
+        self.title_text = None      # plain title (POW title or header nickname), used when there is no character / series
         self.actresses = []         # list of (name, reading) tuples
         self.character = None       # cosplay character name (BUENA)
         self.series = None          # source work name (BUENA)
         self.studio = u"BUENA"      # "POW" for POW entries / POW-labelled BUENA
         self.release_date = None    # datetime (POW entries)
-        self.amateur_code = None    # e.g. "ZARJ070" or "POW023"
+        self.amateur_code = None    # e.g. "ZARJ-070" or "POW-023"
         self.av_code = None         # e.g. "PRIN-042"
         self.duration_ms = None
-        self.fanza_av_ps = None       # pics.dmm.co.jp/digital/video/<cid>/<cid>ps.jpg
-        self.fanza_amateur = None     # awsimgsrc.dmm.co.jp/.../amateur/<cid>/<cid>jp.jpg
+        self.fanza_av_ps = None       # .../digital/video/<cid>/<cid>ps.jpg
+        self.fanza_amateur = None     # .../digital/amateur/<cid>/<cid>jp.jpg
+        self.getchu_id = None         # Getchu product id, e.g. "1108622"
+        self.dlgetchu_id = None       # DL.Getchu item id, e.g. "4038100"
         self.code_keys = set()
 
     def add_key(self, code):
@@ -83,6 +123,17 @@ class Entry(object):
         """
         return self.fanza_av_ps or self.fanza_amateur
 
+    def has_data(self):
+        """Return whether the entry carries anything beyond its code.
+
+        konodare lists placeholder rows (grey, empty cells) for releases it knows nothing about.
+
+        Returns:
+            bool: True when the entry has a store id, a cross-ref code, a cover or a duration.
+        """
+        return bool(self.getchu_id or self.dlgetchu_id or self.amateur_code or self.av_code or
+                    self.fanza_av_ps or self.fanza_amateur or self.duration_ms)
+
 
 class Buena(SearchAgent, MetadataAgent):
     """Agent that scrapes BUENA / POW cosplay-AV metadata from konodare.wew.jp."""
@@ -94,9 +145,9 @@ class Buena(SearchAgent, MetadataAgent):
     # the instance the first time it is built, shadowing this class default.
     index = None
 
-    # ------------------------------------------------------------------
+    # //////////////////////////////////////////////////////////////////////////////////////////////////
+    # //////////////////////////////////////////////////////////////////////////////////////////////////
     # Search
-    # ------------------------------------------------------------------
 
     def guess_keywords(self, name, filename, directory):
         text = u" ".join([name or u"", filename or u"", directory or u""])
@@ -123,9 +174,9 @@ class Buena(SearchAgent, MetadataAgent):
                 return [self.make_search_item(entry)]
         return []
 
-    # ------------------------------------------------------------------
+    # //////////////////////////////////////////////////////////////////////////////////////////////////
+    # //////////////////////////////////////////////////////////////////////////////////////////////////
     # Metadata
-    # ------------------------------------------------------------------
 
     def get_metadata(self, agent_id, video_code, lang):
         self.ensure_index()
@@ -170,16 +221,15 @@ class Buena(SearchAgent, MetadataAgent):
 
         return metadata
 
-    # ------------------------------------------------------------------
+    # //////////////////////////////////////////////////////////////////////////////////////////////////
+    # //////////////////////////////////////////////////////////////////////////////////////////////////
     # Index cache
-    # ------------------------------------------------------------------
 
     def ensure_index(self):
-        """Fetch and parse both catalog pages once, caching the result.
+        """Fetch and parse the catalog pages once, caching the result.
 
-        POW is indexed first so that POW-NNN codes resolve to the dedicated POW
-        entries rather than a BUENA cross-reference. Cached for the process
-        lifetime once non-empty.
+        POW is indexed first so that POW-NNN codes resolve to the dedicated POW entries rather than a BUENA cross-reference. The
+        buenap rows on /buena/ are merged into their POW entry. Cached for the process lifetime once non-empty.
         """
         if self.index is not None:
             return
@@ -188,13 +238,37 @@ class Buena(SearchAgent, MetadataAgent):
         for entry in self.parse_pow_page():
             for key in entry.code_keys:
                 index.setdefault(key, entry)
-        for entry in self.parse_buena_page():
+        for entry in self.parse_buena_pages() + self.parse_catalog_page(ASAICHI_URL):
+            target = entry
+            if entry.code.startswith(u"BUENAP-"):
+                pow_entry = index.get(normalize_code(entry.amateur_code))
+                if pow_entry is not None and pow_entry.code.startswith(u"POW-"):
+                    self.merge_into_pow(pow_entry, entry)
+                    target = pow_entry
+                elif entry.amateur_code and entry.amateur_code.startswith(u"POW-"):
+                    # Newer than the POW page: the buenap row is the only record, so name it by its POW code.
+                    entry.code = entry.amateur_code
             for key in entry.code_keys:
-                index.setdefault(key, entry)
+                index.setdefault(key, target)
 
         if index:
             self.index = index
         self.logger.debug("Indexed %d BUENA/POW codes", len(index))
+
+    def merge_into_pow(self, pow_entry, entry):
+        """Copy the store ids and cross-refs of a buenap row into the POW entry it describes.
+
+        Args:
+            pow_entry (Entry): The entry parsed from the POW page.
+            entry (Entry): The buenap entry parsed from the BUENA page.
+        """
+        pow_entry.getchu_id = pow_entry.getchu_id or entry.getchu_id
+        pow_entry.dlgetchu_id = pow_entry.dlgetchu_id or entry.dlgetchu_id
+        pow_entry.av_code = pow_entry.av_code or entry.av_code
+        pow_entry.fanza_av_ps = pow_entry.fanza_av_ps or entry.fanza_av_ps
+        if not pow_entry.actresses:
+            pow_entry.actresses = entry.actresses
+        pow_entry.code_keys.update(entry.code_keys)
 
     def fetch_soup(self, url, warn=True):
         """Fetch a page and return its parsed soup, or `None` on failure.
@@ -222,25 +296,205 @@ class Buena(SearchAgent, MetadataAgent):
             return None
         return BeautifulSoup(html, "html.parser")
 
-    def parse_buena_page(self):
-        """Return an `Entry` for each `table.product-list` on the BUENA page.
+    def parse_buena_pages(self):
+        """Return the entries from every `/buena/` page, following the pagination links.
 
         Returns:
             list[Entry]: The parsed BUENA entries.
         """
         entries = []
-        soup = self.fetch_soup(BUENA_URL)
-        if soup is None:
-            return entries
-        for table in soup.select("table.product-list"):
-            try:
-                entry = self.parse_table(table)
-            except Exception as e:
-                self.logger.debug("Failed to parse a product-list table: %s", e)
-                continue
-            if entry and entry.code:
-                entries.append(entry)
+        url = BUENA_URL
+        seen = set()
+        while url and url not in seen and len(seen) < MAX_BUENA_PAGES:
+            seen.add(url)
+            soup = self.fetch_soup(url)
+            if soup is None:
+                break
+            entries.extend(self.parse_catalog(soup))
+            link = soup.find("link", rel="next")
+            url = link.get("href") if link else None
         return entries
+
+    def parse_catalog_page(self, url):
+        """Return the entries from a single catalog page.
+
+        Args:
+            url (str): The page URL.
+
+        Returns:
+            list[Entry]: The parsed entries.
+        """
+        soup = self.fetch_soup(url)
+        if soup is None:
+            return []
+        return self.parse_catalog(soup)
+
+    def parse_catalog(self, soup):
+        """Return an `Entry` for each code row in the catalog tables of a page.
+
+        Args:
+            soup: The parsed catalog page.
+
+        Returns:
+            list[Entry]: The parsed entries.
+        """
+        entries = []
+        scope = soup.find(class_="entry-content") or soup
+        for table in scope.find_all("table"):
+            try:
+                entries.extend(self.parse_catalog_table(table))
+            except Exception as e:
+                self.logger.debug("Failed to parse a catalog table: %s", e)
+        return entries
+
+    def parse_catalog_table(self, table):
+        """Parse a catalog table into entries.
+
+        A header row (a cell spanning 3-4 columns) holds the actress and cosplay of the code rows below it. Each code row starts
+        with a primary code such as `buena075` and is followed by media rows for the same entry. Cells sitting beside the header
+        (a `rowspan` cell shared with the next code row) belong to that next entry.
+
+        Args:
+            table: A BeautifulSoup `<table>` tag.
+
+        Returns:
+            list[Entry]: The parsed entries, without placeholder rows.
+        """
+        entries = []
+        header = None
+        header_cells = []
+        entry = None
+        for tr in table.find_all("tr"):
+            if tr.find_parent("table") is not table:
+                continue
+            cells = tr.find_all(["td", "th"], recursive=False)
+            if not cells:
+                continue
+            if cells[0].get("colspan") in ("3", "4"):
+                header = cells[0]
+                header_cells = cells[1:]
+                entry = None
+                continue
+            code = self.primary_code(cells[0])
+            if code and (entry is None or code != entry.code):
+                entry = self.new_entry(code, header)
+                entries.append(entry)
+                # Header-side cells come last so the entry's own duration wins over a shared compilation's.
+                for cell in cells + header_cells:
+                    self.collect_cell(entry, cell)
+                header_cells = []
+            elif entry is not None:
+                for cell in cells:
+                    self.collect_cell(entry, cell)
+        return [e for e in entries if e.has_data()]
+
+    def primary_code(self, cell):
+        """Return the canonical code when `cell` starts with a primary code, e.g. `BUENA-001` for "buena001 asaichi001".
+
+        Args:
+            cell: The first cell of a table row.
+
+        Returns:
+            str or None: The canonical code, or `None` when the row is not a code row.
+        """
+        tokens = cell.get_text(u" ", strip=True).split()
+        m = PRIMARY_CODE_RE.match(tokens[0]) if tokens else None
+        if not m:
+            return None
+        return u"%s-%03d" % (m.group(1).upper(), int(m.group(2)))
+
+    def new_entry(self, code, header):
+        """Create an entry for `code`, filled from its header row.
+
+        Args:
+            code (str): The canonical code.
+            header: The header cell above the code row, or `None`.
+
+        Returns:
+            Entry: The new entry.
+        """
+        entry = Entry()
+        entry.code = code
+        entry.add_key(code)
+        if header is not None:
+            self.fill_header(entry, header)
+        return entry
+
+    def fill_header(self, entry, header):
+        """Fill actresses, cosplay and the nickname title from a header cell.
+
+        Headers either link `/actress/` and `/cosplay/` pages, or are plain text like "みごっち【ひなた澪】" with a
+        `span.right` line label (朝一番 / たかまり) in front.
+
+        Args:
+            entry (Entry): The entry to populate.
+            header: The header cell.
+        """
+        self.fill_actresses(entry, header)
+        self.fill_cosplay(entry, header)
+        text = u"".join(s for s in header.find_all(string=True) if not s.find_parent("span", class_="right"))
+        text = u" ".join(text.split())
+        if not entry.actresses:
+            self.fill_actress_text(entry, text)
+        title = u" ".join(re.sub(u"【.*?】", u" ", text).split())
+        if title.count(u")") > title.count(u"("):
+            title = title.rstrip(u")").strip()
+        entry.title_text = title or None
+
+    def collect_cell(self, entry, cell):
+        """Collect codes, store ids, FANZA covers and the duration from one catalog cell.
+
+        Args:
+            entry (Entry): The entry to populate.
+            cell: A BeautifulSoup `<td>` tag.
+        """
+        text = cell.get_text(u" ", strip=True)
+        for token in text.split():
+            if CODE_TOKEN_RE.match(token):
+                entry.add_key(token)
+                # A plain POW cross-ref code (e.g. "POW023") marks a POW-labelled release even without a FANZA link.
+                if POW_TOKEN_RE.match(token) and not entry.amateur_code:
+                    entry.amateur_code = cid_to_code(token)
+                    entry.studio = u"POW"
+        for a in cell.find_all("a", href=True):
+            self.collect_url(entry, a["href"])
+        for img in cell.find_all("img"):
+            self.collect_url(entry, self.unwrap_image_url(img.get("src", "")))
+        if not entry.duration_ms:
+            dm = re.search(u"(\\d+)\\s*分", text)
+            if dm:
+                entry.duration_ms = int(dm.group(1)) * 60 * 1000
+
+    def collect_url(self, entry, url):
+        """Collect store ids, FANZA cross-ref codes and covers from a link or image url.
+
+        Args:
+            entry (Entry): The entry to populate.
+            url (str): The href or image src.
+        """
+        if not url:
+            return
+        if u"%" in url:
+            url = unquote(url.encode("utf-8")).decode("utf-8", "ignore")
+        entry.getchu_id = entry.getchu_id or extract_soft_id(url)
+        entry.dlgetchu_id = entry.dlgetchu_id or extract_dl_id(url)
+
+        m = FANZA_LINK_RE.search(url)
+        if m:
+            code = cid_to_code(m.group(3))
+            if m.group(1) == "amateur" or m.group(2) == "videoc":
+                entry.amateur_code = entry.amateur_code or code
+                if code.startswith(u"POW"):
+                    entry.studio = u"POW"
+            else:
+                entry.av_code = entry.av_code or code
+            entry.add_key(code)
+
+        if FANZA_AV_IMG_RE.search(url) and not entry.fanza_av_ps:
+            entry.fanza_av_ps = url
+        m = FANZA_AMATEUR_IMG_RE.search(url)
+        if m and not entry.fanza_amateur:
+            entry.fanza_amateur = m.group(1) + u"jp.jpg"
 
     def parse_pow_page(self):
         """Return an `Entry` for each POW release row on the POW page.
@@ -261,64 +515,6 @@ class Buena(SearchAgent, MetadataAgent):
             if entry and entry.code:
                 entries.append(entry)
         return entries
-
-    def parse_table(self, table):
-        """Parse a single `table.product-list` element into an `Entry`.
-
-        Args:
-            table: A BeautifulSoup `<table class="product-list">` tag.
-
-        Returns:
-            Entry or None: The parsed entry, or `None` when it lacks a code.
-        """
-        entry = Entry()
-
-        # The header spans all columns; it may be a <th> or a <td class="...">.
-        header = table.find(lambda t: t.name in ("th", "td") and t.get("colspan") == "4")
-        if header:
-            self.fill_actresses(entry, header)
-            self.fill_cosplay(entry, header)
-
-        # Code row: the first row whose leading cell is exactly the primary buenaNNN
-        # code. Cells are plain <td> - width attributes are inconsistent across entries.
-        code_cells = None
-        for tr in table.find_all("tr"):
-            cells = tr.find_all("td", recursive=False)
-            if cells and re.match(r"(?i)^buena0*\d+$", cells[0].get_text(strip=True) or u""):
-                code_cells = cells
-                break
-        if not code_cells:
-            return None
-        codes = [self.clean_code(td.get_text(strip=True)) for td in code_cells[:4]]
-        while len(codes) < 4:
-            codes.append(None)
-        primary, variant, amateur, av = codes[0], codes[1], codes[2], codes[3]
-        m = re.match(r"(?i)buena0*(\d+)", primary or u"")
-        if not m:
-            return None
-        entry.code = u"BUENA-%03d" % int(m.group(1))
-        entry.amateur_code = amateur
-        entry.av_code = av
-        if amateur and amateur.upper().startswith(u"POW"):
-            entry.studio = u"POW"
-        for code in [primary, variant, amateur, av, entry.code]:
-            if code:
-                entry.add_key(code)
-
-        # Duration: the first minutes marker in the table (the primary release).
-        dm = re.search(u"(\\d+)\\s*分", table.get_text())
-        if dm:
-            entry.duration_ms = int(dm.group(1)) * 60 * 1000
-
-        # Cover images embedded in the media cells (unwrap the i0.wp.com proxy).
-        for img in table.find_all("img"):
-            src = self.unwrap_image_url(img.get("src", ""))
-            if "pics.dmm.co.jp/digital/video/" in src and not entry.fanza_av_ps:
-                entry.fanza_av_ps = src
-            elif "awsimgsrc.dmm.co.jp" in src and "/amateur/" in src and not entry.fanza_amateur:
-                entry.fanza_amateur = src
-
-        return entry
 
     def parse_pow_row(self, tr):
         """Parse a single POW release row into an `Entry`.
@@ -368,7 +564,11 @@ class Buena(SearchAgent, MetadataAgent):
         if tm:
             entry.duration_ms = int(tm.group(1)) * 60 * 1000
 
+        # Many rows name the actress as plain text instead of an /actress/ link.
         self.fill_actresses(entry, cells[-1])
+        cast = cells[-1].get_text(u"", strip=True)
+        if not entry.actresses and u"女優" in cast:
+            self.fill_actress_text(entry, cast[cast.index(u"女優"):])
 
         # Cover: prefer the full-size jp.jpg in the <a href>, else the thumbnail.
         link = cells[0].find("a", href=re.compile(r"awsimgsrc\.dmm\.co\.jp"))
@@ -413,6 +613,23 @@ class Buena(SearchAgent, MetadataAgent):
             if name and name not in seen:
                 seen.add(name)
                 entry.actresses.append((name, self.slug_reading(a.get("href", ""))))
+
+    def fill_actress_text(self, entry, text):
+        """Add actresses named as plain text inside the first `【...】` of `text`.
+
+        Args:
+            entry (Entry): The entry to populate.
+            text (str): Text such as "みごっち【ひなた澪】" or "女優：【高坂あいり】".
+        """
+        m = re.search(u"【(.*?)】", text or u"")
+        if not m:
+            return
+        seen = set(name for name, reading in entry.actresses)
+        for name in re.split(u"[、,/／]", m.group(1)):
+            name = name.strip()
+            if name and name not in DASHES and name not in seen:
+                seen.add(name)
+                entry.actresses.append((name, None))
 
     def fill_cosplay(self, entry, scope):
         """Set character / series from `/cosplay/` links within `scope`.
@@ -514,17 +731,13 @@ class Buena(SearchAgent, MetadataAgent):
                 pass
 
         for img in scope.find_all("img"):
-            src = self.unwrap_image_url(img.get("src", ""))
-            if "pics.dmm.co.jp/digital/video/" in src and not entry.fanza_av_ps:
-                entry.fanza_av_ps = src
-            elif "awsimgsrc.dmm.co.jp" in src and "/amateur/" in src and not entry.fanza_amateur:
-                entry.fanza_amateur = src
+            self.collect_url(entry, self.unwrap_image_url(img.get("src", "")))
 
         return entry
 
-    # ------------------------------------------------------------------
+    # //////////////////////////////////////////////////////////////////////////////////////////////////
+    # //////////////////////////////////////////////////////////////////////////////////////////////////
     # Helpers
-    # ------------------------------------------------------------------
 
     def build_title(self, entry):
         """Build the display title `[CODE] character (series)` or `[CODE] title`.
@@ -588,20 +801,6 @@ class Buena(SearchAgent, MetadataAgent):
         posters.sort(key=lambda r: r.score, reverse=True)
         art.sort(key=lambda r: r.score, reverse=True)
         return posters, art
-
-    def clean_code(self, text):
-        """Return a code cell's text, or `None` for an empty / dash cell.
-
-        Args:
-            text (str): The stripped cell text.
-
-        Returns:
-            str or None: The code, or `None`.
-        """
-        text = (text or u"").strip()
-        if not text or text in (u"-", u"–", u"—", u"−"):
-            return None
-        return text
 
     def unwrap_image_url(self, src):
         """Strip the Jetpack Photon (`i0.wp.com`) wrapper and query from `src`.
