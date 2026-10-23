@@ -7,7 +7,7 @@ from urllib import unquote
 from bs4 import BeautifulSoup
 
 from .base import AccessRestrictedError, MetadataAgent, SearchAgent
-from .getchu import extract_dl_id, extract_soft_id, fetch_dl_item, fetch_soft
+from .getchu import extract_dl_id, extract_soft_id, fetch_dl_item, fetch_soft, search_soft_id
 from .types import Metadata, Person, Resource, SearchItem
 from .utils import get_code_group
 
@@ -44,6 +44,12 @@ FANZA_LINK_RE = re.compile(r"dmm\.co\.jp/(?:(amateur|av)/content/\?id=|digital/(
 # FANZA cover images on either image host (pics.dmm.co.jp or awsimgsrc.dmm.co.jp).
 FANZA_AV_IMG_RE = re.compile(r"/digital/video/([a-z0-9_]+)/\1(?:ps|pt|pl)\.jpg$")
 FANZA_AMATEUR_IMG_RE = re.compile(r"^(.*/digital/amateur/([a-z0-9_]+)/\2)j[a-z]?\.jpg$")
+
+# A cosplay release code on its own, after `normalize_code()`, e.g. "BUENA369".
+BUENA_KEY_RE = re.compile(r"^BUENA(\d+)$")
+
+# The leading code and the trailing full-width bracket tag (e.g. "[cosplay]") around a Getchu product title.
+GETCHU_TITLE_RE = re.compile(u"(?i)^\\s*buena\\d+\\s*|\\s*\uff3b[^\uff3d]*\uff3d\\s*$")
 
 # Placeholders konodare uses for an empty cell or an unknown actress.
 DASHES = (u"-", u"–", u"—", u"−", u"―")
@@ -167,7 +173,7 @@ class Buena(SearchAgent, MetadataAgent):
         # Fallback: a code missing from the index (e.g. a POW release beyond the
         # index range) may still have its own konodare detail page.
         for kw in keywords:
-            entry = self.fetch_detail_entry(kw)
+            entry = self.fetch_detail_entry(kw) or self.fetch_getchu_entry(kw)
             if entry:
                 for key in entry.code_keys:
                     self.index.setdefault(key, entry)
@@ -182,7 +188,7 @@ class Buena(SearchAgent, MetadataAgent):
         self.ensure_index()
         entry = self.index.get(normalize_code(video_code)) or self.index.get(normalize_code(agent_id))
         if not entry:
-            entry = self.fetch_detail_entry(video_code) or self.fetch_detail_entry(agent_id)
+            entry = self.fetch_detail_entry(video_code) or self.fetch_detail_entry(agent_id) or self.fetch_getchu_entry(video_code)
         if not entry:
             raise Exception(u"No BUENA/POW entry for %s" % video_code)
 
@@ -746,6 +752,39 @@ class Buena(SearchAgent, MetadataAgent):
                 self.logger.debug("Matched %s via detail page /%s/", entry.code, slug)
                 return entry
         return None
+
+    def fetch_getchu_entry(self, code):
+        """Build an entry from the Getchu product page for a cosplay release that konodare has not listed yet.
+
+        Args:
+            code (str): A raw or normalized code such as `buena369`.
+
+        Returns:
+            Entry or None: The entry, or `None` when the code is not a `BUENA` code, Getchu is disabled or has no such product.
+        """
+        m = BUENA_KEY_RE.match(normalize_code(code) or u"")
+        if not m or not self.prefs["getchu_enabled"]:
+            return None
+        slug = u"buena%03d" % int(m.group(1))
+        try:
+            soft_id = search_soft_id(self.session, slug, self.raise_for_status)
+            info = fetch_soft(self.session, soft_id, self.raise_for_status) if soft_id else None
+        except Exception as e:
+            self.logger.warning("Getchu search for %s failed: %s", slug, e)
+            return None
+        if not info:
+            return None
+
+        entry = Entry()
+        entry.code = u"BUENA-%03d" % int(m.group(1))
+        entry.add_key(entry.code)
+        entry.getchu_id = soft_id
+        entry.title_text = GETCHU_TITLE_RE.sub(u"", info["title"] or u"") or None
+        entry.release_date = info["release_date"]
+        if info["duration_min"]:
+            entry.duration_ms = info["duration_min"] * 60 * 1000
+        self.logger.debug("Matched %s via Getchu product %s", entry.code, soft_id)
+        return entry
 
     def parse_detail_page(self, soup, prefix, num):
         """Parse a konodare per-item detail page into an `Entry`.

@@ -68,6 +68,16 @@ class TestBuenaAgent(AgentTestCase):
         self.assertEqual(1, len(results))
         self.assertEqual(u"POW-084", results[0].video_code)
 
+    def test_search_getchu_fallback(self):
+        # releases newer than konodare's catalog are still found on Getchu
+        results = self.agent.search([u"buena355"], "ja")
+        self.assertEqual(1, len(results))
+        self.assertEqual(u"BUENA-355", results[0].video_code)
+        self.assertTrue(results[0].title.startswith(u"[BUENA-355] "))
+
+    def test_search_getchu_fallback_unknown_code(self):
+        self.assertEqual([], self.agent.search([u"buena99999"], "ja"))
+
     # //////////////////////////////////////////////////////////////////////////////////////////////////
     # //////////////////////////////////////////////////////////////////////////////////////////////////
     # Metadata test cases
@@ -110,6 +120,13 @@ class TestBuenaAgent(AgentTestCase):
         self.assertTrue(metadata.summary.startswith(u"圧倒的うぶっ娘"))
         self.assertReleaseDateIs(datetime.datetime(2021, 11, 25), metadata)
         self.assertGenresInclude([u"コスプレ", u"お嬢様"], metadata)
+
+    def test_metadata_getchu_fallback(self):
+        metadata = self.agent.get_metadata(u"BUENA-369", u"BUENA-369", "ja")
+        self.assertStudioIs(u"BUENA", metadata)
+        self.assertReleaseDateIs(datetime.datetime(2026, 10, 24), metadata)
+        self.assertDurationExists(metadata)
+        self.assertTrue(metadata.posters)
 
     def test_metadata_pow_label_studio(self):
         # POW-labelled releases report POW as the studio
