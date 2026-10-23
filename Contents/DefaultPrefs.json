@@ -66,6 +66,12 @@
         "default": true
     },
     {
+        "id": "getchu_enabled",
+        "label": "Enable Getchu enrichment for BUENA",
+        "type": "bool",
+        "default": true
+    },
+    {
         "id": "buena_enabled",
         "label": "Enable BUENA agent",
         "type": "bool",

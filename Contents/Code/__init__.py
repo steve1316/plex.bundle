@@ -830,6 +830,7 @@ def log_prefs():
         "user_agent",
         "avbase_enabled",
         "duga_enabled",
+        "getchu_enabled",
         "buena_enabled",
         "javlibrary_enabled",
         "javlibrary_cf_clearance",
