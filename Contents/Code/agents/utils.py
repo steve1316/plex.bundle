@@ -3,10 +3,10 @@
 import re
 
 
-# Pattern for standard JAV video codes (e.g. "JBD-226")
+# Pattern for standard JAV video codes (e.g. "JBD-226"), with an optional numeric amateur prefix (e.g. "230OREMO-042")
 VIDEO_CODE_PATTERN = re.compile(
     r"(?:^|\s|\[|\(|\.|\\|/)"
-    r"([a-zA-Z]+-[a-zA-Z]*\d+)"
+    r"(\d*[a-zA-Z]+-[a-zA-Z]*\d+)"
     r"(?:$|\s|\]|\)|\.)",
 )
 

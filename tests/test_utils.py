@@ -80,6 +80,8 @@ class TestGuessVideoCodePositive(BaseTestCase):
         ("/movies/MIDE-100/MIDE-100.mp4", "MIDE-100"),
         ("stars.STARS-999.mp4", "STARS-999"),
         ("ADV-R0630", "ADV-R0630"),
+        ("230OREMO-042.mp4", "230OREMO-042"),
+        ("[259LUXU-1234] title.mp4", "259LUXU-1234"),
     ]
 
     def test_positive_cases(self):
