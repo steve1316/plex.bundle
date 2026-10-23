@@ -6,6 +6,7 @@ from collections import OrderedDict
 import json
 import logging
 import os
+import re
 import struct
 import requests
 from urlparse import urlparse
@@ -819,8 +820,9 @@ def folder_matches_code(folder, video_code):
     """
     if not video_code:
         return False
-    name = u"".join([c for c in os.path.basename(folder).upper() if c.isalnum()])
-    code = u"".join([c for c in video_code.upper() if c.isalnum()])
+    # A regex instead of a per-character loop, since the Plex sandbox cannot iterate over strings.
+    name = re.sub(r"[\W_]+", u"", os.path.basename(folder).upper(), flags=re.UNICODE)
+    code = re.sub(r"[\W_]+", u"", video_code.upper(), flags=re.UNICODE)
     return bool(code) and code in name
 
 

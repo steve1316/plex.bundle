@@ -323,6 +323,22 @@ class TestSandboxExecution(unittest.TestCase):
         # Actually call Start() — it should succeed without error.
         start_fn()
 
+    def test_folder_matches_code_executes(self):
+        # Plex's _getiter_ calls x.__iter__(), which py2 strings lack, so string iteration only fails here.
+        importer = SandboxImporter(CODE_PATH, {}, elevated=True)
+        env = make_sandbox_environment(importer)
+        importer.environment = env
+
+        init_path = os.path.join(CODE_PATH, "__init__.py")
+        source = open(init_path, 'r').read()
+        code = compile_source(source, "__init__.py", elevated=True)
+        exec(code) in env
+
+        matches = env["folder_matches_code"]
+        self.assertTrue(matches(u"/Library/r18 jav/DANDY-149", u"DANDY-149"))
+        self.assertTrue(matches(u"/Library/r18 jav/230OREMO-042", u"OREMO-042"))
+        self.assertFalse(matches(u"/Library/r18 jav", u"DANDY-149"))
+
 
 if __name__ == '__main__':
     unittest.main()
