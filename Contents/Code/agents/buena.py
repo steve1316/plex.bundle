@@ -6,6 +6,7 @@ from urllib import unquote
 
 from bs4 import BeautifulSoup
 
+from .avbase import AVBase
 from .base import AccessRestrictedError, MetadataAgent, SearchAgent
 from .getchu import extract_dl_id, extract_soft_id, fetch_dl_item, fetch_soft, search_soft_id
 from .types import Metadata, Person, Resource, SearchItem
@@ -151,6 +152,9 @@ class Buena(SearchAgent, MetadataAgent):
     # the instance the first time it is built, shadowing this class default.
     index = None
 
+    # AVBase agent used to backfill fields from the FANZA cross-ref codes, built on first use.
+    avbase = None
+
     # //////////////////////////////////////////////////////////////////////////////////////////////////
     # //////////////////////////////////////////////////////////////////////////////////////////////////
     # Search
@@ -227,8 +231,47 @@ class Buena(SearchAgent, MetadataAgent):
 
         if self.prefs["getchu_enabled"]:
             self.hydrate_from_getchu(entry, metadata)
+        self.hydrate_from_avbase(entry, metadata, lang)
 
         return metadata
+
+    def hydrate_from_avbase(self, entry, metadata, lang):
+        """Fill the summary, labels and directors that are still empty from AVBase's page for the entry's FANZA cross-ref.
+
+        The FANZA codes are compilations or re-releases, so their title, date, cast and covers are never used. A failed lookup only logs a
+        warning.
+
+        Args:
+            entry (Entry): The catalog entry carrying the cross-ref codes.
+            metadata (Metadata): The metadata to fill in place.
+            lang (str): The metadata language.
+        """
+        codes = [code for code in [entry.av_code, entry.amateur_code] if code and code != entry.code]
+        if not codes or (metadata.summary and metadata.labels and metadata.directors):
+            return
+        if self.avbase is None:
+            self.avbase = AVBase(self.prefs)
+        if not self.avbase.enabled:
+            return
+        for code in codes:
+            try:
+                items = [item for item in self.avbase.search([code], lang) if item.score == 100]
+                if not items:
+                    continue
+                other = self.avbase.get_metadata(items[0].id, code, lang)
+            except Exception as e:
+                self.logger.warning("AVBase lookup of %s for %s failed: %s", code, entry.code, e)
+                continue
+            if other.summary and not metadata.summary:
+                metadata.summary = other.summary
+            if other.labels and not metadata.labels:
+                metadata.labels = other.labels
+            if other.directors and not metadata.directors:
+                metadata.directors = other.directors
+            if other.genres:
+                metadata.genres.update(other.genres)
+            self.logger.debug("Backfilled %s from AVBase %s", entry.code, code)
+            return
 
     def hydrate_from_getchu(self, entry, metadata):
         """Fill the summary, release date, genres, duration and covers from the entry's Getchu pages.

@@ -114,6 +114,19 @@ class TestBuenaAgent(AgentTestCase):
         self.assertIsNone(metadata.release_date)
         self.assertNotIn(u"https://www.getchu.com/brandnew/1108622/c1108622package.jpg", metadata.posters)
 
+    def test_metadata_avbase_backfill(self):
+        # without Getchu, the summary comes from AVBase's page for the PRIN-042 re-release, but its title and date are not used
+        self.update_prefs(getchu_enabled=False)
+        metadata = self.agent.get_metadata(u"BUENA-075", u"BUENA-075", "ja")
+        self.assertTrue(metadata.summary)
+        self.assertTrue(metadata.title.startswith(u"[BUENA-075] "))
+        self.assertIsNone(metadata.release_date)
+
+    def test_metadata_avbase_disabled(self):
+        self.update_prefs(getchu_enabled=False, avbase_enabled=False)
+        metadata = self.agent.get_metadata(u"BUENA-075", u"BUENA-075", "ja")
+        self.assertIsNone(metadata.summary)
+
     def test_metadata_dl_getchu_entry(self):
         # BUENA-002 links only to DL.Getchu, which has the synopsis, delivery date and genre tags
         metadata = self.agent.get_metadata(u"BUENA-002", u"BUENA-002", "ja")
