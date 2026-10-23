@@ -734,6 +734,25 @@ class TestBuildFolderName(BaseTestCase):
         self.assertIsNone(_main.build_folder_name(self._metadata(title=None), "ja", u"DANDY-149"))
         self.assertIsNone(_main.build_folder_name(self._metadata(title=u"DANDY-149"), "ja", u"DANDY-149"))
 
+    def test_folder_code_prefix(self):
+        meta = self._metadata(u"OREMO-042 Rugby Club Manager N", studio=u"Ore", year=2023)
+        self.assertEqual(u"230OREMO-042 [Ore] - Rugby Club Manager N (2023)", _main.build_folder_name(meta, "ja", u"OREMO-042", u"230OREMO-042"))
+
+
+class TestFolderCode(BaseTestCase):
+
+    def test_respells_plain_code(self):
+        self.assertEqual(u"EBOD-889", _main.folder_code(u"/Library/r18 jav/ebod889", u"EBOD-889"))
+        self.assertEqual(u"DANDY-149", _main.folder_code(u"/Library/r18 jav/DANDY-149 [Dandy] - Riding (2008)", u"DANDY-149"))
+
+    def test_keeps_prefix_and_tags(self):
+        self.assertEqual(u"230OREMO-042", _main.folder_code(u"/Library/r18 jav/230OREMO-042", u"OREMO-042"))
+        self.assertEqual(u"SCOH-182-4k", _main.folder_code(u"/Library/r18 jav/SCOH-182-4k [Kosucchi] - Title (2023)", u"SCOH-182"))
+
+    def test_none_when_first_word_is_not_the_code(self):
+        self.assertIsNone(_main.folder_code(u"/Library/r18 jav/[FHD] DANDY-149", u"DANDY-149"))
+        self.assertIsNone(_main.folder_code(u"/Library/r18 jav/DANDY-150", u"DANDY-149"))
+
 
 class TestIsBareFolder(BaseTestCase):
 
@@ -803,6 +822,11 @@ class TestRenameFolder(BaseTestCase):
         agent = self._agent(existing=(self.TARGET,))
         self._rename(agent)
         self.assertEqual([], self.moves)
+
+    def test_bare_folder_keeps_its_tag(self):
+        agent = self._agent()
+        self._rename(agent, folder=u"/Library/r18 jav/DANDY-149-4k")
+        self.assertEqual([(u"/Library/r18 jav/DANDY-149-4k", u"/Library/r18 jav/DANDY-149-4k [DANDY] - The Temptation (2009)")], self.moves)
 
 
 class TestJAVAgentSearch(BaseTestCase):

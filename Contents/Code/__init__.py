@@ -473,12 +473,15 @@ class JAVAgent(Agent.Movies):
         if isinstance(media_path, str):
             media_path = media_path.decode("utf-8")
         folder = os.path.dirname(media_path)
+        code = folder_code(folder, video_code)
+        if not code:
+            return
         if is_bare_folder(folder, video_code):
             if not Prefs["rename_bare_folders"]:
                 return
-        elif not (Prefs["rename_existing_folders"] and folder_matches_code(folder, video_code)):
+        elif not Prefs["rename_existing_folders"]:
             return
-        name = build_folder_name(metadata, lang, video_code)
+        name = build_folder_name(metadata, lang, video_code, code)
         if not name or name == os.path.basename(folder):
             return
         target = os.path.join(os.path.dirname(folder), name)
@@ -941,10 +944,41 @@ def folder_matches_code(folder, video_code):
     """
     if not video_code:
         return False
+    code = code_key(video_code)
+    return bool(code) and code in code_key(os.path.basename(folder))
+
+
+def code_key(text):
+    """Return `text` upper-cased with punctuation and spaces removed, so `ebod889` and `EBOD-889` compare equal.
+
+    Args:
+        text (str): The text to normalize.
+
+    Returns:
+        str: The normalized text.
+    """
     # A regex instead of a per-character loop, since the Plex sandbox cannot iterate over strings.
-    name = re.sub(r"[\W_]+", u"", os.path.basename(folder).upper(), flags=re.UNICODE)
-    code = re.sub(r"[\W_]+", u"", video_code.upper(), flags=re.UNICODE)
-    return bool(code) and code in name
+    return re.sub(r"[\W_]+", u"", text.upper(), flags=re.UNICODE)
+
+
+def folder_code(folder, video_code):
+    """Return the code to start the folder's new name with, keeping the folder's own spelling when it adds to the video code.
+
+    The sources drop amateur prefixes like the `230` of `230OREMO-042` and know nothing of tags like `-4k`, so those stay as the folder has them.
+
+    Args:
+        folder (str): The folder path.
+        video_code (str): The video code, e.g. "OREMO-042".
+
+    Returns:
+        str: `video_code`, or the folder's first word when it carries extra characters. None when the first word is not this video's code.
+    """
+    token = os.path.basename(folder).split(u" ", 1)[0]
+    if not folder_matches_code(token, video_code):
+        return None
+    if code_key(token) == code_key(video_code):
+        return video_code
+    return token
 
 
 def is_bare_folder(folder, video_code):
@@ -977,13 +1011,14 @@ def clean_folder_text(text):
     return u" ".join(text.split())
 
 
-def build_folder_name(metadata, lang, video_code):
+def build_folder_name(metadata, lang, video_code, code=None):
     """Return a folder name like `DANDY-149 [DANDY] - The Temptation (2009)`.
 
     Args:
         metadata (Metadata): The merged metadata.
         lang (str): The metadata language, used to uncensor the title the same way Plex shows it.
         video_code (str): The video code, e.g. "DANDY-149".
+        code (str): The code to start the name with, e.g. "230OREMO-042". Defaults to `video_code`.
 
     Returns:
         str: The folder name, or None when there is no title besides the code.
@@ -1000,7 +1035,8 @@ def build_folder_name(metadata, lang, video_code):
         title = title[:MAX_FOLDER_TITLE_LENGTH - 3].rstrip() + u"..."
 
     studio = clean_folder_text(metadata.studio)
-    prefix = u"{0} [{1}] - ".format(video_code, studio) if studio else u"{0} - ".format(video_code)
+    code = code or video_code
+    prefix = u"{0} [{1}] - ".format(code, studio) if studio else u"{0} - ".format(code)
     suffix = u" ({0})".format(metadata.release_date.year) if metadata.release_date else u""
     # Untranslated Japanese takes 3 bytes per character, so trim further until the name fits.
     while len((prefix + title + suffix).encode("utf-8")) > MAX_FOLDER_NAME_BYTES and len(title) > 3:
