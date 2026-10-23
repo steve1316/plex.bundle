@@ -11,6 +11,7 @@ from .caribpr import CaribbeanPr  # noqa: E402
 from .dmm import DMM  # noqa: E402
 from .gfriends import GFriends  # noqa: E402
 from .heyzo import Heyzo  # noqa: E402
+from .javdb import JavDB  # noqa: E402
 from .javlibrary import JAVLibrary  # noqa: E402
 from .mgstage import MGStage  # noqa: E402
 from .pondo import Pondo  # noqa: E402
