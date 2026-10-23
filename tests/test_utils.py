@@ -1,7 +1,7 @@
 # coding=utf-8
 
 from base import BaseTestCase
-from agents.utils import guess_video_code
+from agents.utils import br_to_newlines, guess_video_code
 from Code import parse_metadata_id, update_metadata_id, is_legacy_metadata_id
 
 
@@ -110,6 +110,19 @@ class TestGuessVideoCodeNegative(BaseTestCase):
                 "guess_video_code(%r) should return None, got %r" % (
                     text, result),
             )
+
+
+class TestBrToNewlines(BaseTestCase):
+
+    def test_converts_br_variants(self):
+        self.assertEqual(u"a\nb\nc\nd", br_to_newlines(u"a<br>b<br/>c<BR />d"))
+
+    def test_keeps_paragraph_breaks_and_trims_spaces(self):
+        self.assertEqual(u"one\n\ntwo", br_to_newlines(u"one <br><br> two "))
+
+    def test_empty_input(self):
+        self.assertEqual(None, br_to_newlines(None))
+        self.assertEqual(u"", br_to_newlines(u""))
 
 
 if __name__ == "__main__":

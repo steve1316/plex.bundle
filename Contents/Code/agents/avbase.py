@@ -7,7 +7,7 @@ import re
 from .duga import extract_product_id, fetch_description
 from .base import MetadataAgent, SearchAgent
 from .types import Metadata, Person, Resource, SearchItem
-from .utils import get_code_group, guess_video_code
+from .utils import br_to_newlines, get_code_group, guess_video_code
 
 
 BASE_URL = "https://www.avbase.net"
@@ -181,7 +181,7 @@ class AVBase(SearchAgent, MetadataAgent):
 
             iteminfo = product.get("iteminfo", {}) or {}
             if not metadata.summary and iteminfo.get("description"):
-                metadata.summary = iteminfo["description"]
+                metadata.summary = br_to_newlines(iteminfo["description"])
             if not metadata.duration and iteminfo.get("volume"):
                 m = re.search(r"(\d+)", u"{0}".format(iteminfo["volume"]))
                 if m:

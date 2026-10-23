@@ -26,6 +26,21 @@ def guess_video_code(text):
     return None
 
 
+def br_to_newlines(text):
+    """Convert HTML `<br>` tags in `text` to newlines and trim the spaces around each line break.
+
+    Args:
+        text (str): Text that may contain `<br>`, `<br/>` or `<br />` tags.
+
+    Returns:
+        str: The text with line breaks, or the input unchanged when it is empty.
+    """
+    if not text:
+        return text
+    text = re.sub(r"(?i)<br\s*/?>", u"\n", text)
+    return re.sub(r"[ \t]*\n[ \t]*", u"\n", text).strip()
+
+
 def get_code_group(video_code):
     """Extract the code group from a video code, e.g. "ABC" from "ABC-123".
 
