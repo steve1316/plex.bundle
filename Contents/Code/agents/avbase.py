@@ -70,7 +70,8 @@ class AVBase(SearchAgent, MetadataAgent):
             score = 100 if work_id.upper() == video_code.upper() else 80
 
             item = SearchItem()
-            item.id = u"{0}:{1}".format(prefix, work_id)
+            # Works without a prefix (e.g. amateur releases like POW-084) live at `/works/<work_id>`.
+            item.id = u"{0}:{1}".format(prefix, work_id) if prefix else work_id
             item.video_code = work_id.upper()
             item.title = u"{0} {1}".format(work_id.upper(), title) if title else work_id.upper()
             item.year = year
@@ -94,8 +95,8 @@ class AVBase(SearchAgent, MetadataAgent):
             metadata, attribute, new_value)
 
     def get_metadata(self, agent_id, video_code, lang):
-        # agent_id is "prefix:work_id"
-        url = u"{0}/works/{1}".format(BASE_URL, agent_id)
+        # agent_id is "prefix:work_id", or just "work_id" for a work without a prefix. Older ids stored that case as ":work_id".
+        url = u"{0}/works/{1}".format(BASE_URL, agent_id.lstrip(u":"))
         resp = self.session.get(url)
         self.raise_for_status(resp)
 
