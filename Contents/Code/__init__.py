@@ -327,9 +327,9 @@ class JAVAgent(Agent.Movies):
                 self.save_local_files(media_path, video_code, metadata, lang, poster_data, art_data, best_poster)
             except Exception as e:
                 Log.Exception("Failed to save local files next to %s: %s", media_path, e)
-        if Prefs["rename_bare_folders"] and media_path:
+        if (Prefs["rename_bare_folders"] or Prefs["rename_existing_folders"]) and media_path:
             try:
-                self.rename_bare_folder(media_path, video_code, metadata, lang)
+                self.rename_folder(media_path, video_code, metadata, lang)
             except Exception as e:
                 Log.Exception("Failed to rename the folder of %s: %s", media_path, e)
 
@@ -424,10 +424,11 @@ class JAVAgent(Agent.Movies):
         for name, data in photos:
             self.write_file(os.path.join(actors, name + u".jpg"), data)
 
-    def rename_bare_folder(self, media_path, video_code, metadata, lang):
-        """Rename a folder named only by the video code to `CODE [Studio] - Title (Year)`.
+    def rename_folder(self, media_path, video_code, metadata, lang):
+        """Rename the video's folder to `CODE [Studio] - Title (Year)`.
 
-        Folders that already have a title are left alone, so a re-translated title never renames a folder twice.
+        A folder named only by the video code is renamed when `rename_bare_folders` is on. A folder that already has a title is renamed
+        only when `rename_existing_folders` is on, since a re-translated title then renames it again.
 
         Args:
             media_path (str): Path of the video file.
@@ -438,10 +439,13 @@ class JAVAgent(Agent.Movies):
         if isinstance(media_path, str):
             media_path = media_path.decode("utf-8")
         folder = os.path.dirname(media_path)
-        if not is_bare_folder(folder, video_code):
+        if is_bare_folder(folder, video_code):
+            if not Prefs["rename_bare_folders"]:
+                return
+        elif not (Prefs["rename_existing_folders"] and folder_matches_code(folder, video_code)):
             return
         name = build_folder_name(metadata, lang, video_code)
-        if not name:
+        if not name or name == os.path.basename(folder):
             return
         target = os.path.join(os.path.dirname(folder), name)
         if self.path_exists(target):
@@ -863,6 +867,7 @@ def log_prefs():
         "ollama_model",
         "save_local_files",
         "rename_bare_folders",
+        "rename_existing_folders",
     ]:
         value = Prefs[key]
         if key in proxy_keys:

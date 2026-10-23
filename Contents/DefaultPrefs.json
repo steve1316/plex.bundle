@@ -18,6 +18,12 @@
         "default": true
     },
     {
+        "id": "rename_existing_folders",
+        "label": "Also rename folders that already have a title when the new 'CODE [Studio] - Title (Year)' name differs",
+        "type": "bool",
+        "default": false
+    },
+    {
         "id": "geo_proxy",
         "label": "Geo proxy for DMM/MGStage (e.g. http://user:pass@jp-node:18080)",
         "type": "text",
