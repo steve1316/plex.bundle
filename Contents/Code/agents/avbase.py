@@ -218,7 +218,7 @@ class AVBase(SearchAgent, MetadataAgent):
 
             # The digital product's first sample is often the native portrait front cover (e.g. DMM's jp-1, whose wide
             # `pl.jpg` is only a promo montage). Offer it as a poster candidate; the picker keeps it only if it is a
-            # portrait, so scene stills on titles where the first sample is landscape are ignored.
+            # portrait that matches the front panel of a wide cover, so scene stills are ignored.
             if samples and image_url and "digital" in image_url:
                 first_large = samples[0].get("l", "")
                 if first_large:

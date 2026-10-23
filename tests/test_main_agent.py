@@ -311,13 +311,50 @@ class TestPosterSelection(BaseTestCase):
         self.assertEqual(b, agent.pick_best_poster([a, b, c]))
 
     def test_best_poster_prefers_native_portrait(self):
-        # A native portrait cover (jp-1) wins even over a larger, higher-scored landscape cover.
+        # A native portrait cover (jp-1) that matches the front cover wins even over a larger, higher-scored landscape cover.
         agent = JAVAgent()
         portrait = self._res(u"jp1", 45)
         landscape = self._res(u"cover", 60)
         agent.is_portrait = lambda r: r is portrait
+        agent.is_front_cover = lambda r, covers: True
         agent.image_size = lambda r: 9000 if r is landscape else 100
         self.assertEqual(portrait, agent.pick_best_poster([landscape, portrait]))
+
+    def test_best_poster_skips_portrait_scene_still(self):
+        # EBOD-889: jp-1 is a scene still, not the front cover, so the wide cover is used (and cropped) instead.
+        agent = JAVAgent()
+        still = self._res(u"jp1", 45)
+        landscape = self._res(u"cover", 50)
+        agent.is_portrait = lambda r: r is still
+        agent.is_front_cover = lambda r, covers: False
+        agent.image_size = lambda r: 100
+        self.assertEqual(landscape, agent.pick_best_poster([landscape, still]))
+
+    def test_best_poster_keeps_portrait_without_covers_to_check(self):
+        # With no wide cover to compare against, an unverified portrait is still better than nothing.
+        agent = JAVAgent()
+        portrait = self._res(u"jp1", 45)
+        agent.is_portrait = lambda r: True
+        agent.is_front_cover = lambda r, covers: False
+        agent.image_size = lambda r: 100
+        self.assertEqual(portrait, agent.pick_best_poster([portrait]))
+
+    def test_is_front_cover_matches_any_cover(self):
+        agent = JAVAgent()
+        agent.download_image = lambda url: url
+        diffs = {(u"jp1", u"digital"): 59.4, (u"jp1", u"mono"): 1.0}
+        agent.image_difference = lambda a, b: diffs.get((a, b))
+        self.assertTrue(agent.is_front_cover(u"jp1", [u"digital", u"mono"]))
+        self.assertFalse(agent.is_front_cover(u"jp1", [u"digital"]))
+
+    def test_is_front_cover_false_when_comparison_unavailable(self):
+        # PIL failing (difference None) or a failed download must not verify the portrait.
+        agent = JAVAgent()
+        agent.download_image = lambda url: url
+        agent.image_difference = lambda a, b: None
+        self.assertFalse(agent.is_front_cover(u"jp1", [u"mono"]))
+        agent.download_image = lambda url: None
+        self.assertFalse(agent.is_front_cover(u"jp1", [u"mono"]))
 
     def test_best_poster_falls_back_when_no_portrait(self):
         agent = JAVAgent()
@@ -349,13 +386,14 @@ class TestPosterSelection(BaseTestCase):
         self.assertFalse(agent.is_portrait(u"pixhost"))
 
     def test_best_poster_skips_portrait_thumbnail(self):
-        # EBOD-889: a tiny higher-scored `ps.jpg` thumbnail must not beat the full-size `jp-1` portrait.
+        # A tiny higher-scored `ps.jpg` thumbnail must not beat a full-size `jp-1` front cover.
         agent = JAVAgent()
         landscape = self._res(u"pl", 50)
         jp1 = self._res(u"jp1", 45)
         ps = self._res(u"ps", 50)
         dims = {landscape: (2184, 1468), jp1: (532, 800), ps: (147, 200)}
         agent.image_dimensions = lambda r: dims.get(r)
+        agent.is_front_cover = lambda r, covers: True
         agent.image_size = lambda r: 100
         self.assertEqual(jp1, agent.pick_best_poster([landscape, jp1, ps]))
 

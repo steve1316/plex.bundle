@@ -19,6 +19,14 @@ version = "2026.03.1"
 # Portraits shorter than this are thumbnails (DMM `ps.jpg` is 200px, pixhost thumbs 300px), not usable posters.
 MIN_PORTRAIT_POSTER_HEIGHT = 400
 
+# Covers wider than this aspect ratio are front+back double covers. The front cover is the right `FRONT_COVER_RATIO` of the width.
+WIDE_COVER_ASPECT = 1.2
+FRONT_COVER_RATIO = 0.4725
+
+# A portrait whose mean per-pixel difference from a cover's front panel is below this is that front cover. A real cover scores ~1
+# while scene stills score 34 or more.
+MAX_FRONT_COVER_DIFFERENCE = 15
+
 
 def Start():
     Log.Info("Starting JAV Agent version %s", version)
@@ -392,10 +400,10 @@ class JAVAgent(Agent.Movies):
     def pick_best_poster(self, resources):
         """Return the best poster, preferring a native portrait cover over a landscape one.
 
-        A native portrait (e.g. DMM's `jp-1` front cover) is used as-is with no cropping. When no candidate is a
-        portrait, the best landscape cover is chosen (and cropped to the front later). Within the chosen orientation,
-        score comes first so a high-quality cover is not displaced by a larger but lower-scored one, with file size only
-        breaking ties.
+        A native portrait (e.g. DMM's `jp-1` front cover) is used as-is with no cropping, but only when it matches the front
+        panel of one of the wide covers. DMM's `jp-1` is often a scene still instead. Otherwise the best landscape cover is
+        chosen (and cropped to the front later). Score comes first so a high-quality cover is not displaced by a larger but
+        lower-scored one, with file size only breaking ties.
 
         Args:
             resources (list): Candidate poster/cover resources.
@@ -406,10 +414,66 @@ class JAVAgent(Agent.Movies):
         if not resources:
             return None
         portraits = [r for r in resources if self.is_portrait(r)]
-        pool = portraits or resources
+        covers = [r for r in resources if r not in portraits]
+        if covers:
+            portraits = [r for r in portraits if self.is_front_cover(r, covers)]
+        pool = portraits or covers or resources
         top_score = max(r.score for r in pool)
         return self.pick_largest_image(
             [r for r in pool if r.score == top_score])
+
+    def is_front_cover(self, resource, covers):
+        """Return True when the portrait image matches the front panel of one of the covers.
+
+        Args:
+            resource: The portrait image resource to check.
+            covers (list): The other cover resources to compare against.
+
+        Returns:
+            bool: True when the portrait is the front cover, False when it is not or the comparison is unavailable.
+        """
+        portrait_data = self.download_image(resource)
+        if portrait_data is None:
+            return False
+        for cover in sorted(covers, key=lambda r: getattr(r, "score", 0), reverse=True):
+            cover_data = self.download_image(cover)
+            if cover_data is None:
+                continue
+            difference = self.image_difference(portrait_data, cover_data)
+            if difference is not None and difference < MAX_FRONT_COVER_DIFFERENCE:
+                return True
+        return False
+
+    def image_difference(self, portrait_data, cover_data):
+        """Return the mean per-pixel grayscale difference between a portrait and the front panel of a cover.
+
+        Both images are shrunk to a small grid first, so only the overall layout is compared.
+
+        Args:
+            portrait_data (str): The raw portrait image bytes.
+            cover_data (str): The raw cover image bytes. Wide covers are cropped to their front panel first.
+
+        Returns:
+            float: The difference from 0 (identical) to 255, or None when PIL is unavailable or the images cannot be read.
+        """
+        try:
+            from PIL import Image
+            from io import BytesIO
+            portrait = Image.open(BytesIO(portrait_data)).convert("L")
+            cover = Image.open(BytesIO(cover_data)).convert("L")
+            width, height = cover.size
+            if float(width) / float(height) >= WIDE_COVER_ASPECT:
+                front_width = int(round(width * FRONT_COVER_RATIO))
+                cover = cover.crop((width - front_width, 0, width, height))
+            a = list(portrait.resize((24, 36), Image.BILINEAR).getdata())
+            b = list(cover.resize((24, 36), Image.BILINEAR).getdata())
+            total = 0
+            for i in range(len(a)):
+                total += abs(a[i] - b[i])
+            return float(total) / len(a)
+        except Exception as e:
+            Log.Info("Front-cover comparison skipped (%s)", e)
+            return None
 
     def download_image(self, url):
         """Download the raw image bytes at `url`.
@@ -444,9 +508,9 @@ class JAVAgent(Agent.Movies):
             from io import BytesIO
             img = Image.open(BytesIO(data))
             width, height = img.size
-            if width <= 0 or height <= 0 or float(width) / float(height) < 1.2:
+            if width <= 0 or height <= 0 or float(width) / float(height) < WIDE_COVER_ASPECT:
                 return data
-            front_width = int(round(width * 0.4725))
+            front_width = int(round(width * FRONT_COVER_RATIO))
             crop = img.crop((width - front_width, 0, width, height)).convert("RGB")
             out = BytesIO()
             crop.save(out, format="JPEG", quality=95)
