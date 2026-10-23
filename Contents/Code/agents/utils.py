@@ -4,12 +4,13 @@ import re
 
 
 # Pattern for standard JAV video codes (e.g. "JBD-226"), with an optional numeric amateur prefix (e.g. "230OREMO-042")
-# and an ignored "-4k" quality suffix (e.g. "SCOH-182-4k")
+# and ignored "-4k" / "-ub" / "-uc" / "-unblurred" / "-uncensored" suffixes (e.g. "SCOH-182-4k", "ABC-123-4k-uc")
 VIDEO_CODE_PATTERN = re.compile(
     r"(?:^|\s|\[|\(|\.|\\|/)"
     r"(\d*[a-zA-Z]+-[a-zA-Z]*\d+)"
-    r"(?:-4[kK])?"
+    r"(?:[-_](?:4k|ub|uc|unblurred|uncensored))*"
     r"(?:$|\s|\]|\)|\.)",
+    re.IGNORECASE,
 )
 
 
