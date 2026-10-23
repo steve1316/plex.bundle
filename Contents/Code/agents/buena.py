@@ -274,7 +274,7 @@ class Buena(SearchAgent, MetadataAgent):
             return
 
     def hydrate_from_getchu(self, entry, metadata):
-        """Fill the summary, release date, genres, duration and covers from the entry's Getchu pages.
+        """Fill the summary, release date, genres, duration, covers and trailer from the entry's Getchu pages.
 
         konodare has no synopsis or release date for BUENA entries. A failed fetch only logs a warning, so the konodare metadata is kept.
 
@@ -307,6 +307,13 @@ class Buena(SearchAgent, MetadataAgent):
         if posters:
             posters.sort(key=lambda r: r.score, reverse=True)
             metadata.posters = posters
+
+        # The DL.Getchu trial of a video item is its sample movie.
+        if dl_info.get("trailer_url") and self.validate_video(dl_info["trailer_url"]):
+            trailer = Resource(dl_info["trailer_url"])
+            trailer.thumb = dl_info.get("cover_url")
+            trailer.score = 45
+            metadata.trailers = [trailer]
 
     def fetch_getchu_page(self, fetch, item_id, code):
         """Fetch one Getchu page, returning an empty dict when there is no id or the fetch fails.
