@@ -285,13 +285,13 @@ class Buena(SearchAgent, MetadataAgent):
         dl_info = self.fetch_getchu_page(fetch_dl_item, entry.dlgetchu_id, entry.code)
         soft_info = self.fetch_getchu_page(fetch_soft, entry.getchu_id, entry.code)
 
-        # DL.Getchu has the full synopsis. The Getchu product page has the original package release date.
+        # DL.Getchu has the full synopsis. Its delivery date is when the item was re-listed there, often years after the release, so only
+        # the Getchu product page's package release date is used.
         for info in [dl_info, soft_info]:
             if info.get("description") and not metadata.summary:
                 metadata.summary = info["description"]
-        for info in [soft_info, dl_info]:
-            if info.get("release_date") and not metadata.release_date:
-                metadata.release_date = info["release_date"]
+        if soft_info.get("release_date") and not metadata.release_date:
+            metadata.release_date = soft_info["release_date"]
         for genre in dl_info.get("genres") or []:
             metadata.genres.add(genre)
         if soft_info.get("duration_min") and not metadata.duration:

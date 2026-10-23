@@ -53,6 +53,14 @@ class TestCleanDescription(BaseTestCase):
         self.assertEqual(u"溢れるほどのザー汁を美味しそうにゴク飲み！", getchu.clean_description(text, None))
 
 
+class TestParseDlItem(BaseTestCase):
+    def test_drops_download_notes(self):
+        html = (u'<table><tr><td class="bluetext">作品内容</td><td>キャンキャン良い声で鳴きながら何度も絶頂。<br>※本編顔出し<br>'
+                u'※本作品は分割ファイルでの配信となっております。<br>ダウンロードページより2つのファイルをダウンロード後、<br>'
+                u'5506-86304-1.part1(.exe)を実行ください。<br>(総ダウンロード容量：3,079,872,512 Byte)</td></tr></table>')
+        self.assertEqual(u"キャンキャン良い声で鳴きながら何度も絶頂。\n※本編顔出し", getchu.parse_dl_item(html)["description"])
+
+
 # //////////////////////////////////////////////////////////////////////////////////////////////////
 # //////////////////////////////////////////////////////////////////////////////////////////////////
 # Live pages

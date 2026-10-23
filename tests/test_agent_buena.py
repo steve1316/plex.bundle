@@ -128,10 +128,10 @@ class TestBuenaAgent(AgentTestCase):
         self.assertIsNone(metadata.summary)
 
     def test_metadata_dl_getchu_entry(self):
-        # BUENA-002 links only to DL.Getchu, which has the synopsis, delivery date and genre tags
+        # BUENA-002 links only to DL.Getchu, which has the synopsis and genre tags. Its delivery date is a re-listing date, so it is not used.
         metadata = self.agent.get_metadata(u"BUENA-002", u"BUENA-002", "ja")
         self.assertTrue(metadata.summary.startswith(u"圧倒的うぶっ娘"))
-        self.assertReleaseDateIs(datetime.datetime(2021, 11, 25), metadata)
+        self.assertIsNone(metadata.release_date)
         self.assertGenresInclude([u"コスプレ", u"お嬢様"], metadata)
 
     def test_metadata_getchu_fallback(self):
@@ -180,6 +180,7 @@ class TestBuenaAgent(AgentTestCase):
         self.assertActressesInclude([u"田中ねね"], metadata)
         self.assertReleaseDateIs(datetime.datetime(2021, 2, 17), metadata)
         self.assertTrue(metadata.summary)
+        self.assertNotIn(u"ダウンロード", metadata.summary)
         self.assertGenresInclude([u"ケモミミ"], metadata)
 
 

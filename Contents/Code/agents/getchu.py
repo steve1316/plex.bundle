@@ -33,6 +33,9 @@ DL_ID_RES = [
 DATE_RE = re.compile(r"(\d{4})/(\d{1,2})/(\d{1,2})")
 MINUTES_RE = re.compile(u"(\\d+)\\s*分")
 
+# Lines of the download instructions DL.Getchu appends to split-file synopses, e.g. "...part1(.exe)を実行ください".
+DOWNLOAD_NOTE_RE = re.compile(u"分割ファイル|ダウンロード|\\.exe")
+
 
 def extract_soft_id(url):
     """Return the Getchu product id from a Getchu product, affiliate or image url.
@@ -227,7 +230,8 @@ def parse_dl_item(html):
         elif name == u"趣向":
             info["genres"] = [a.get_text(strip=True) for a in value.find_all("a") if a.get_text(strip=True)]
         elif name == u"作品内容":
-            info["description"] = value.get_text("\n", strip=True) or None
+            lines = [line for line in value.get_text("\n", strip=True).split("\n") if not DOWNLOAD_NOTE_RE.search(line)]
+            info["description"] = u"\n".join(lines) or None
 
     info["cover_url"] = meta_image(soup)
     return info
