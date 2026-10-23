@@ -12,6 +12,12 @@
         "default": true
     },
     {
+        "id": "rename_bare_folders",
+        "label": "Rename folders named only by the video code to 'CODE [Studio] - Title (Year)'",
+        "type": "bool",
+        "default": true
+    },
+    {
         "id": "geo_proxy",
         "label": "Geo proxy for DMM/MGStage (e.g. http://user:pass@jp-node:18080)",
         "type": "text",

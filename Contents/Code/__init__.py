@@ -32,6 +32,10 @@ MAX_FRONT_COVER_DIFFERENCE = 15
 # Sample images closer than this are the same scene from different stores.
 MAX_DUPLICATE_DIFFERENCE = 15
 
+# Folder titles longer than this are cut with "..." like other JAV scrapers do. The whole name stays under the 255-byte file name limit.
+MAX_FOLDER_TITLE_LENGTH = 100
+MAX_FOLDER_NAME_BYTES = 240
+
 
 def Start():
     Log.Info("Starting JAV Agent version %s", version)
@@ -320,6 +324,11 @@ class JAVAgent(Agent.Movies):
                 self.save_local_files(media_path, video_code, metadata, lang, poster_data, art_data, best_poster)
             except Exception as e:
                 Log.Exception("Failed to save local files next to %s: %s", media_path, e)
+        if Prefs["rename_bare_folders"] and media_path:
+            try:
+                self.rename_bare_folder(media_path, video_code, metadata, lang)
+            except Exception as e:
+                Log.Exception("Failed to rename the folder of %s: %s", media_path, e)
 
     def save_local_files(self, media_path, video_code, metadata, lang, poster_data, art_data, poster_url):
         """Write the poster, fanart, sample images, actress photos and NFO into the video's folder.
@@ -411,6 +420,58 @@ class JAVAgent(Agent.Movies):
         self.replace_dir(actors)
         for name, data in photos:
             self.write_file(os.path.join(actors, name + u".jpg"), data)
+
+    def rename_bare_folder(self, media_path, video_code, metadata, lang):
+        """Rename a folder named only by the video code to `CODE [Studio] - Title (Year)`.
+
+        Folders that already have a title are left alone, so a re-translated title never renames a folder twice.
+
+        Args:
+            media_path (str): Path of the video file.
+            video_code (str): The video code, e.g. "DANDY-149".
+            metadata (Metadata): The merged metadata.
+            lang (str): The metadata language.
+        """
+        if isinstance(media_path, str):
+            media_path = media_path.decode("utf-8")
+        folder = os.path.dirname(media_path)
+        if not is_bare_folder(folder, video_code):
+            return
+        name = build_folder_name(metadata, lang, video_code)
+        if not name:
+            return
+        target = os.path.join(os.path.dirname(folder), name)
+        if self.path_exists(target):
+            Log.Warn(u"Not renaming {0}: {1} already exists".format(folder, target))
+            return
+        self.move_path(folder, target)
+        Log.Info("Renamed %s to %s", folder, target)
+
+    def path_exists(self, path):
+        """Return True when a file or folder exists at `path`.
+
+        Args:
+            path (str): The absolute path.
+
+        Returns:
+            bool: True when the path exists.
+        """
+        if not isinstance(path, str):
+            path = path.encode("utf-8")
+        return Core.storage.file_exists(path)
+
+    def move_path(self, src, dst):
+        """Move the file or folder at `src` to `dst` through the Plex framework.
+
+        Args:
+            src (str): The current absolute path.
+            dst (str): The new absolute path.
+        """
+        if not isinstance(src, str):
+            src = src.encode("utf-8")
+        if not isinstance(dst, str):
+            dst = dst.encode("utf-8")
+        Core.storage.rename(src, dst)
 
     def write_file(self, path, data):
         """Write `data` to `path` through the Plex framework, creating parent folders as needed.
@@ -782,6 +843,7 @@ def log_prefs():
         "ollama_url",
         "ollama_model",
         "save_local_files",
+        "rename_bare_folders",
     ]:
         value = Prefs[key]
         if key in proxy_keys:
@@ -824,6 +886,67 @@ def folder_matches_code(folder, video_code):
     name = re.sub(r"[\W_]+", u"", os.path.basename(folder).upper(), flags=re.UNICODE)
     code = re.sub(r"[\W_]+", u"", video_code.upper(), flags=re.UNICODE)
     return bool(code) and code in name
+
+
+def is_bare_folder(folder, video_code):
+    """Return True when the folder is named only by the video code, e.g. `DANDY-149` or `230OREMO-042`.
+
+    Args:
+        folder (str): The folder path.
+        video_code (str): The video code, e.g. "DANDY-149".
+
+    Returns:
+        bool: True when the folder belongs to this video and has no title yet.
+    """
+    return u" " not in os.path.basename(folder) and folder_matches_code(folder, video_code)
+
+
+def clean_folder_text(text):
+    """Return `text` with characters Windows does not allow in file names replaced or removed.
+
+    Args:
+        text (str): The text, or None.
+
+    Returns:
+        str: The cleaned text with whitespace collapsed, or an empty string.
+    """
+    if not text:
+        return u""
+    text = re.sub(r"[/\\]", u"-", text)
+    text = re.sub(r'[:*?"<>|\x00-\x1f]', u"", text)
+    return u" ".join(text.split())
+
+
+def build_folder_name(metadata, lang, video_code):
+    """Return a folder name like `DANDY-149 [DANDY] - The Temptation (2009)`.
+
+    Args:
+        metadata (Metadata): The merged metadata.
+        lang (str): The metadata language, used to uncensor the title the same way Plex shows it.
+        video_code (str): The video code, e.g. "DANDY-149".
+
+    Returns:
+        str: The folder name, or None when there is no title besides the code.
+    """
+    title = JAVAgent.uncensor_text(metadata.title, lang)
+    if not title or not video_code:
+        return None
+    if title.upper().startswith(video_code.upper()):
+        title = title[len(video_code):]
+    title = clean_folder_text(title)
+    if not title:
+        return None
+    if len(title) > MAX_FOLDER_TITLE_LENGTH:
+        title = title[:MAX_FOLDER_TITLE_LENGTH - 3].rstrip() + u"..."
+
+    studio = clean_folder_text(metadata.studio)
+    prefix = u"{0} [{1}] - ".format(video_code, studio) if studio else u"{0} - ".format(video_code)
+    suffix = u" ({0})".format(metadata.release_date.year) if metadata.release_date else u""
+    # Untranslated Japanese takes 3 bytes per character, so trim further until the name fits.
+    while len((prefix + title + suffix).encode("utf-8")) > MAX_FOLDER_NAME_BYTES and len(title) > 3:
+        title = title[:-4].rstrip() + u"..."
+    # Windows does not allow a name ending in a dot or space.
+    return (prefix + title + suffix).rstrip(u". ")
 
 
 def nfo_text(value):

@@ -338,6 +338,8 @@ class TestSandboxExecution(unittest.TestCase):
         self.assertTrue(matches(u"/Library/r18 jav/DANDY-149", u"DANDY-149"))
         self.assertTrue(matches(u"/Library/r18 jav/230OREMO-042", u"OREMO-042"))
         self.assertFalse(matches(u"/Library/r18 jav", u"DANDY-149"))
+        self.assertTrue(env["is_bare_folder"](u"/Library/r18 jav/DANDY-149", u"DANDY-149"))
+        self.assertEqual(u"DANDY-149 - Hygienist-Nurse", env["clean_folder_text"](u"DANDY-149 - Hygienist/Nurse?"))
 
 
 if __name__ == '__main__':

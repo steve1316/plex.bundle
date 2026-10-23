@@ -669,6 +669,113 @@ class TestApplyMetadataSavesLocalFiles(BaseTestCase):
         agent.save_local_files = mock.MagicMock(side_effect=IOError("read-only"))
         self._apply(agent)
 
+    def test_renames_after_saving_when_pref_on(self):
+        self.update_prefs(save_local_files=True, rename_bare_folders=True)
+        agent = JAVAgent()
+        calls = []
+        agent.save_local_files = lambda *args: calls.append("save")
+        agent.rename_bare_folder = lambda *args: calls.append("rename")
+        self._apply(agent)
+        self.assertEqual(["save", "rename"], calls)
+
+    def test_no_rename_when_pref_off(self):
+        self.update_prefs(save_local_files=False, rename_bare_folders=False)
+        agent = JAVAgent()
+        agent.rename_bare_folder = mock.MagicMock()
+        self._apply(agent)
+        self.assertEqual(0, agent.rename_bare_folder.call_count)
+
+    def test_rename_failure_does_not_break_update(self):
+        self.update_prefs(save_local_files=False, rename_bare_folders=True)
+        agent = JAVAgent()
+        agent.rename_bare_folder = mock.MagicMock(side_effect=OSError("busy"))
+        self._apply(agent)
+
+
+class TestBuildFolderName(BaseTestCase):
+
+    def _metadata(self, title=u"DANDY-149 The Temptation", studio=u"DANDY", year=2009):
+        meta = Metadata()
+        meta.title = title
+        meta.studio = studio
+        meta.release_date = datetime.date(year, 8, 6) if year else None
+        return meta
+
+    def test_code_studio_title_year(self):
+        self.assertEqual(u"DANDY-149 [DANDY] - The Temptation (2009)", _main.build_folder_name(self._metadata(), "ja", u"DANDY-149"))
+
+    def test_title_without_code_prefix(self):
+        self.assertEqual(u"DANDY-149 [DANDY] - The Temptation (2009)", _main.build_folder_name(self._metadata(u"The Temptation"), "ja", u"DANDY-149"))
+
+    def test_slashes_and_illegal_characters(self):
+        meta = self._metadata(u'DANDY-149 Hygienist/Nurse: Why? "Yes" <3 a|b\\c*')
+        self.assertEqual(u"DANDY-149 [DANDY] - Hygienist-Nurse Why Yes 3 ab-c (2009)", _main.build_folder_name(meta, "ja", u"DANDY-149"))
+
+    def test_long_title_cut_with_ellipsis(self):
+        name = _main.build_folder_name(self._metadata(u"DANDY-149 " + u"word " * 40), "ja", u"DANDY-149")
+        title = name[len(u"DANDY-149 [DANDY] - "):-len(u" (2009)")]
+        self.assertTrue(title.endswith(u"..."))
+        self.assertTrue(len(title) <= 100)
+
+    def test_missing_studio_and_year(self):
+        meta = self._metadata(u"DANDY-149 Ends With Dot.", studio=None, year=None)
+        self.assertEqual(u"DANDY-149 - Ends With Dot", _main.build_folder_name(meta, "ja", u"DANDY-149"))
+
+    def test_japanese_title_fits_file_name_limit(self):
+        name = _main.build_folder_name(self._metadata(u"DANDY-149 " + u"あ" * 100), "ja", u"DANDY-149")
+        self.assertTrue(len(name.encode("utf-8")) <= 240)
+        self.assertTrue(name.endswith(u"... (2009)"))
+
+    def test_none_without_title(self):
+        self.assertIsNone(_main.build_folder_name(self._metadata(title=None), "ja", u"DANDY-149"))
+        self.assertIsNone(_main.build_folder_name(self._metadata(title=u"DANDY-149"), "ja", u"DANDY-149"))
+
+
+class TestIsBareFolder(BaseTestCase):
+
+    def test_bare_code_folders(self):
+        self.assertTrue(_main.is_bare_folder(u"/Library/r18 jav/DANDY-149", u"DANDY-149"))
+        self.assertTrue(_main.is_bare_folder(u"/Library/r18 jav/230OREMO-042", u"OREMO-042"))
+
+    def test_named_or_other_folders(self):
+        self.assertFalse(_main.is_bare_folder(u"/Library/r18 jav/DANDY-098 [Dandy] - Riding (2008)", u"DANDY-098"))
+        self.assertFalse(_main.is_bare_folder(u"/Library/r18 jav/DANDY-150", u"DANDY-149"))
+        self.assertFalse(_main.is_bare_folder(u"/Library/r18 jav", u"DANDY-149"))
+
+
+class TestRenameBareFolder(BaseTestCase):
+
+    TARGET = u"/Library/r18 jav/DANDY-149 [DANDY] - The Temptation (2009)"
+
+    def _agent(self, existing=()):
+        agent = JAVAgent()
+        self.moves = []
+        agent.path_exists = lambda path: path in existing
+        agent.move_path = lambda src, dst: self.moves.append((src, dst))
+        return agent
+
+    def _rename(self, agent, folder=u"/Library/r18 jav/DANDY-149"):
+        meta = Metadata()
+        meta.title = u"DANDY-149 The Temptation"
+        meta.studio = u"DANDY"
+        meta.release_date = datetime.date(2009, 8, 6)
+        agent.rename_bare_folder(folder + u"/DANDY-149.mp4", u"DANDY-149", meta, "ja")
+
+    def test_renames_bare_folder(self):
+        agent = self._agent()
+        self._rename(agent)
+        self.assertEqual([(u"/Library/r18 jav/DANDY-149", self.TARGET)], self.moves)
+
+    def test_leaves_named_folder_alone(self):
+        agent = self._agent()
+        self._rename(agent, folder=u"/Library/r18 jav/DANDY-149 [Dandy] - Old Title (2009)")
+        self.assertEqual([], self.moves)
+
+    def test_skips_when_target_exists(self):
+        agent = self._agent(existing=(self.TARGET,))
+        self._rename(agent)
+        self.assertEqual([], self.moves)
+
 
 class TestJAVAgentSearch(BaseTestCase):
 
