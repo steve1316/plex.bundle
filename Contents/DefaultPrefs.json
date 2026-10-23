@@ -72,6 +72,12 @@
         "default": true
     },
     {
+        "id": "javdb_enabled",
+        "label": "Enable JavDB agent",
+        "type": "bool",
+        "default": true
+    },
+    {
         "id": "seesaawiki_enabled",
         "label": "Enable SeeSaaWiki agent",
         "type": "bool",

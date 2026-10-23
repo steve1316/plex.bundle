@@ -567,6 +567,7 @@ def log_prefs():
         "buena_enabled",
         "javlibrary_enabled",
         "javlibrary_cf_clearance",
+        "javdb_enabled",
         "dmm_enabled",
         "mgstage_enabled",
         "seesaawiki_enabled",
