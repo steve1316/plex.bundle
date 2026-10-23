@@ -152,6 +152,8 @@ class JAVAgent(Agent.Movies):
             else:
                 Log.Info("Search returned no results for legacy metadata ID: %s",
                          movie.id)
+        elif force and Prefs["research_on_refresh"]:
+            movie.id = self.add_new_sources(movie.id, media, lang)
 
         video_code, agent_ids = parse_metadata_id(movie.id)
         metadata = Metadata()
@@ -192,6 +194,38 @@ class JAVAgent(Agent.Movies):
             media_path = media.items[0].parts[0].file
         self.apply_metadata(movie, metadata, lang, media_path=media_path, video_code=video_code)
         Log.Info("Update done: %s", repr(metadata))
+
+    def add_new_sources(self, metadata_id, media, lang):
+        """
+        Search again and add the sources that the matched video code has gained since it was matched.
+
+        Sources already in the metadata ID keep their stored IDs, so a manual Fix Match is never overridden.
+
+        Args:
+            metadata_id (str): The stored metadata ID, e.g. `DANDY-280|JAVLibrary.lioaj4y`.
+            media: The Plex media object passed to `update()`, used as the search hints.
+            lang (str): The normalized language code.
+
+        Returns:
+            str: The metadata ID with any new sources appended.
+        """
+        video_code, agent_ids = parse_metadata_id(metadata_id)
+        results = SearchResultCollection()
+        try:
+            self.search(results, media, lang, manual=False)
+        except Exception as e:
+            Log.Warn("Search for new sources of %s failed: %s", video_code, e)
+            return metadata_id
+        for result in results:
+            result_code, result_ids = parse_metadata_id(result.id)
+            if result_code.upper() != video_code.upper():
+                continue
+            for name, agent_id in result_ids.items():
+                if name not in agent_ids:
+                    Log.Info("Adding new source %s.%s to %s", name, agent_id, video_code)
+                    metadata_id = update_metadata_id(metadata_id, name, agent_id)
+            break
+        return metadata_id
 
     def clear_metadata(self, metadata):
         metadata.art.validate_keys([])
@@ -868,6 +902,7 @@ def log_prefs():
         "save_local_files",
         "rename_bare_folders",
         "rename_existing_folders",
+        "research_on_refresh",
     ]:
         value = Prefs[key]
         if key in proxy_keys:

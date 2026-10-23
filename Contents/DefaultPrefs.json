@@ -24,6 +24,12 @@
         "default": false
     },
     {
+        "id": "research_on_refresh",
+        "label": "Search again on Refresh Metadata and add sources found since the item was matched",
+        "type": "bool",
+        "default": false
+    },
+    {
         "id": "geo_proxy",
         "label": "Geo proxy for DMM/MGStage (e.g. http://user:pass@jp-node:18080)",
         "type": "text",

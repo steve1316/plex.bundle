@@ -1354,6 +1354,43 @@ class TestJAVAgentUpdate(BaseTestCase):
 
         mock_search.assert_not_called()
 
+    def research(self, stored_id, found_id, force=True):
+        """Run `update()` with `research_on_refresh` on and a search that finds `found_id`, returning the resulting movie id."""
+        def fake_search(results, hints, lang, manual=False):
+            r = mock.MagicMock()
+            r.id = found_id
+            results.Append(r)
+
+        self.update_prefs(research_on_refresh=True)
+        agent = self._make_agent([])
+        movie = Movie()
+        movie.id = stored_id
+        with mock.patch.object(agent, "search", side_effect=fake_search):
+            agent.update(movie, None, "ja", force=force)
+        return movie.id
+
+    def test_research_adds_new_sources(self):
+        movie_id = self.research("DANDY-280|JAVLibrary.lioaj4y", "DANDY-280|AVBase.dandy:DANDY-280;JAVLibrary.other")
+        self.assertEqual(movie_id, "DANDY-280|JAVLibrary.lioaj4y;AVBase.dandy:DANDY-280")
+
+    def test_research_ignores_other_codes(self):
+        movie_id = self.research("DANDY-280|JAVLibrary.lioaj4y", "DANDY-281|AVBase.dandy:DANDY-281")
+        self.assertEqual(movie_id, "DANDY-280|JAVLibrary.lioaj4y")
+
+    def test_research_needs_force(self):
+        movie_id = self.research("DANDY-280|JAVLibrary.lioaj4y", "DANDY-280|AVBase.dandy:DANDY-280", force=False)
+        self.assertEqual(movie_id, "DANDY-280|JAVLibrary.lioaj4y")
+
+    def test_research_off_skips_search(self):
+        agent = self._make_agent([])
+        movie = Movie()
+        movie.id = "X|agent.id1"
+
+        with mock.patch.object(agent, "search") as mock_search:
+            agent.update(movie, None, "ja", force=True)
+
+        mock_search.assert_not_called()
+
 
 class TestJAVAgentAgentsProperty(BaseTestCase):
 
