@@ -69,6 +69,15 @@ class TestExtractProductId(BaseTestCase):
         self.assertIsNone(duga.extract_product_id(None))
 
 
+class TestSampleMovieUrl(BaseTestCase):
+    def test_label_and_number(self):
+        self.assertEqual(u"https://flv.duga.jp/unsecure/scocci/0170/noauth/temp.mp4", duga.sample_movie_url(u"scocci-0170"))
+
+    def test_invalid_id(self):
+        self.assertIsNone(duga.sample_movie_url(u"scocci"))
+        self.assertIsNone(duga.sample_movie_url(None))
+
+
 # ---------------------------------------------------------------------------
 # parse_description
 # ---------------------------------------------------------------------------

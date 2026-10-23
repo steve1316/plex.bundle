@@ -10,6 +10,7 @@ SOFT_URL = u"https://www.getchu.com/soft.phtml?id={soft_id}&gc=gc"
 SEARCH_URL = u"https://www.getchu.com/php/search.phtml"
 DL_ITEM_URL = u"https://dl.getchu.com/i/item{gcd}"
 GETCHU_BASE_URL = u"https://www.getchu.com"
+GYUTTO_SAMPLE_URL = u"https://gyutto.com/item/item_sample.php?id={item_id}"
 
 # Getchu shows an age gate instead of the product page unless this cookie is sent. DL.Getchu needs no cookie.
 AGE_COOKIES = {"getchu_adalt_flag": "getchu.com"}
@@ -36,6 +37,14 @@ MINUTES_RE = re.compile(u"(\\d+)\\s*分")
 # Lines of the download instructions DL.Getchu appends to split-file synopses, e.g. "...part1(.exe)を実行ください".
 DOWNLOAD_NOTE_RE = re.compile(u"分割ファイル|ダウンロード|\\.exe")
 
+# DL.Getchu trial downloads ("download_sample_file.php?cd=12&f=..."). Video items offer a small phone version and a full-size PC one.
+TRIAL_LINK_RE = re.compile(r"download_sample_file\.php")
+PHONE_TRIAL_LABEL = u"スマホ用"
+
+# Gyutto item ids from an item url ("gyutto.com/i/item263769"), and the sample player call on its sample panel.
+GYUTTO_ID_RE = re.compile(r"gyutto\.com/i/item(\d+)")
+GYUTTO_VIDEO_RE = re.compile(r"VideoTag\('([^']+)'")
+
 
 def extract_soft_id(url):
     """Return the Getchu product id from a Getchu product, affiliate or image url.
@@ -59,6 +68,18 @@ def extract_dl_id(url):
         str: The item id (e.g. '4038100'), or None when the url carries no id.
     """
     return match_first(DL_ID_RES, url)
+
+
+def extract_gyutto_id(url):
+    """Return the Gyutto item id from a Gyutto item url.
+
+    Args:
+        url: A Gyutto url (str), or None.
+
+    Returns:
+        str: The item id (e.g. '263769'), or None when the url carries no id.
+    """
+    return match_first([GYUTTO_ID_RE], url)
 
 
 def match_first(patterns, url):
@@ -116,6 +137,26 @@ def fetch_dl_item(session, gcd, raise_for_status=None):
     """
     html = fetch_html(session, DL_ITEM_URL.format(gcd=gcd), raise_for_status)
     return parse_dl_item(html)
+
+
+def fetch_gyutto_trailer(session, item_id, raise_for_status=None):
+    """Fetch the sample panel of a Gyutto item and return its sample movie url.
+
+    Args:
+        session: A requests-like session exposing a `get` method.
+        item_id: The Gyutto item id (e.g. '263769').
+        raise_for_status: Optional callable invoked with the response to check its status. Defaults to the response's own
+            `raise_for_status`.
+
+    Raises:
+        Exception: Whatever `raise_for_status` or the session raises (e.g. AccessRestrictedError, HTTPError, network errors).
+
+    Returns:
+        str: The sample movie url, or None when the item has no sample movie.
+    """
+    html = fetch_html(session, GYUTTO_SAMPLE_URL.format(item_id=item_id), raise_for_status)
+    match = GYUTTO_VIDEO_RE.search(html)
+    return match.group(1).replace(u"&amp;", u"&") if match else None
 
 
 def search_soft_id(session, code, raise_for_status=None):
@@ -211,10 +252,10 @@ def parse_dl_item(html):
         html: The item-page HTML (str).
 
     Returns:
-        dict: `title`, `release_date` (datetime), `genres` (list), `description` and `cover_url`. Missing fields are None.
+        dict: `title`, `release_date` (datetime), `genres` (list), `description`, `cover_url` and `trailer_url`. Missing fields are None.
     """
     soup = BeautifulSoup(html, "html.parser")
-    info = {"title": None, "release_date": None, "genres": [], "description": None, "cover_url": None}
+    info = {"title": None, "release_date": None, "genres": [], "description": None, "cover_url": None, "trailer_url": None}
 
     meta = soup.find("meta", attrs={"property": "og:title"})
     if meta and meta.get("content"):
@@ -234,7 +275,33 @@ def parse_dl_item(html):
             info["description"] = u"\n".join(lines) or None
 
     info["cover_url"] = meta_image(soup)
+    info["trailer_url"] = parse_trial_url(soup)
     return info
+
+
+def parse_trial_url(soup):
+    """Return the trial download url of a DL.Getchu item, preferring the small phone version over the full-size PC one.
+
+    The trial of a game is an installer, not a video, so callers still validate the url before using it as a trailer.
+
+    Args:
+        soup: The parsed item page.
+
+    Returns:
+        str: The trial download url, or None when the item has no trial.
+    """
+    links = soup.find_all("a", href=TRIAL_LINK_RE)
+    if not links:
+        return None
+    best = links[0]
+    for a in links:
+        if a.parent is not None and PHONE_TRIAL_LABEL in a.parent.get_text(strip=True):
+            best = a
+            break
+    url = best["href"]
+    if url.startswith(u"//"):
+        url = u"https:" + url
+    return url
 
 
 def parse_search(html, code):

@@ -12,6 +12,9 @@ PRODUCT_URL = BASE_URL + "/ppv/{product_id}/"
 # like "https://click.duga.jp/ppv/doc-1990/39588-1".
 PRODUCT_ID_RE = re.compile(r"/ppv/([^/?]+)")
 
+# Duga serves each product's sample movie at a fixed path built from the label and number of its id (e.g. "scocci-0170").
+SAMPLE_MOVIE_URL = "https://flv.duga.jp/unsecure/{label}/{number}/noauth/temp.mp4"
+
 
 def extract_product_id(url):
     """Return the Duga product id from a Duga product or click url.
@@ -28,6 +31,21 @@ def extract_product_id(url):
     if match:
         return match.group(1)
     return None
+
+
+def sample_movie_url(product_id):
+    """Return the sample movie url of a Duga product.
+
+    Args:
+        product_id: The Duga product id (e.g. 'scocci-0170'), or None.
+
+    Returns:
+        str: The sample movie url, or None when the id has no label and number.
+    """
+    if not product_id or "-" not in product_id:
+        return None
+    label, number = product_id.rsplit("-", 1)
+    return SAMPLE_MOVIE_URL.format(label=label, number=number)
 
 
 def fetch_description(session, product_id, raise_for_status=None):

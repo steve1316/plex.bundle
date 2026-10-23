@@ -37,6 +37,10 @@ class TestExtractIds(BaseTestCase):
         self.assertIsNone(getchu.extract_soft_id(None))
         self.assertIsNone(getchu.extract_dl_id(u"https://example.com/"))
 
+    def test_gyutto_id(self):
+        self.assertEqual(u"263769", getchu.extract_gyutto_id(u"https://gyutto.com/i/item263769/af-13179"))
+        self.assertIsNone(getchu.extract_gyutto_id(u"https://dl.getchu.com/i/item4050758"))
+
 
 # //////////////////////////////////////////////////////////////////////////////////////////////////
 # //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -59,6 +63,16 @@ class TestParseDlItem(BaseTestCase):
                 u'※本作品は分割ファイルでの配信となっております。<br>ダウンロードページより2つのファイルをダウンロード後、<br>'
                 u'5506-86304-1.part1(.exe)を実行ください。<br>(総ダウンロード容量：3,079,872,512 Byte)</td></tr></table>')
         self.assertEqual(u"キャンキャン良い声で鳴きながら何度も絶頂。\n※本編顔出し", getchu.parse_dl_item(html)["description"])
+
+    def test_trial_prefers_phone_version(self):
+        html = (u'<table><tr><td><a href="https://file3.dl.getchu.com/download_sample_file.php?cd=12&f=pc&t=0">'
+                u'<img src="/images/btn_tryal.gif"></a><br>パソコン用体験版</td>'
+                u'<td><a href="//file3.dl.getchu.com/download_sample_file.php?cd=12&f=sp&t=0"><img src="/images/btn_tryal.gif"></a><br>'
+                u'スマホ用体験版</td></tr></table>')
+        self.assertEqual(u"https://file3.dl.getchu.com/download_sample_file.php?cd=12&f=sp&t=0", getchu.parse_dl_item(html)["trailer_url"])
+
+    def test_no_trial(self):
+        self.assertIsNone(getchu.parse_dl_item(u"<table></table>")["trailer_url"])
 
 
 # //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -84,6 +98,15 @@ class TestLivePages(BaseTestCase):
         self.assertIn(u"お嬢様", info["genres"])
         self.assertTrue(info["description"].startswith(u"圧倒的うぶっ娘"))
         self.assertEqual(u"https://dl.getchu.com/data/item_img/40381/4038100/4038100top.jpg", info["cover_url"])
+
+    def test_fetch_dl_item_trailer(self):
+        # SCOH-182's 4K edition offers a phone and a PC trial movie
+        info = getchu.fetch_dl_item(self.session, u"4050758")
+        self.assertIn(u"download_sample_file.php", info["trailer_url"])
+
+    def test_fetch_gyutto_trailer(self):
+        url = getchu.fetch_gyutto_trailer(self.session, u"263769")
+        self.assertTrue(url.startswith(u"https://gyutto.com/item/sample.php?item_id=263769&"))
 
     def test_search_soft_id(self):
         self.assertEqual(u"1370192", getchu.search_soft_id(self.session, u"buena354"))

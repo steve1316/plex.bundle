@@ -73,7 +73,7 @@
     },
     {
         "id": "getchu_enabled",
-        "label": "Enable Getchu enrichment for BUENA",
+        "label": "Enable Getchu and Gyutto lookups (BUENA metadata, AVBase trailers)",
         "type": "bool",
         "default": true
     },

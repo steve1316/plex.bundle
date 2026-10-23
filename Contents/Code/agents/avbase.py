@@ -4,8 +4,9 @@ import datetime
 import json
 import re
 
-from .duga import extract_product_id, fetch_description
+from .duga import extract_product_id, fetch_description, sample_movie_url
 from .base import MetadataAgent, SearchAgent
+from .getchu import extract_dl_id, extract_gyutto_id, fetch_dl_item, fetch_gyutto_trailer
 from .types import Metadata, Person, Resource, SearchItem
 from .utils import br_to_newlines, get_code_group, guess_video_code
 
@@ -236,7 +237,81 @@ class AVBase(SearchAgent, MetadataAgent):
         if art_list:
             metadata.art = art_list
 
+        metadata.trailers = self.find_trailers(work)
+
         return metadata
+
+    def find_trailers(self, work):
+        """Return the first playable sample movie among the work's products.
+
+        FANZA products carry a direct sample url, and Duga's is built from its product id. The DL.Getchu and Gyutto item pages are
+        only fetched when none of those plays.
+
+        Args:
+            work: The AVBase work dict.
+
+        Returns:
+            list[Resource]: A one-item trailer list, or None when no product has a playable sample movie.
+        """
+        products = work.get("products", [])
+        candidates = []
+        for product in products:
+            url = product.get("sample_movie_url")
+            if not url and product.get("source") == "duga" and self.prefs["duga_enabled"]:
+                url = sample_movie_url(extract_product_id(product.get("url")))
+            if url:
+                candidates.append(self.trailer_resource(url, product, 50 if product.get("source") == "duga" else 30))
+        trailer = self.first_playable(candidates)
+
+        if trailer is None and self.prefs["getchu_enabled"]:
+            for product in products:
+                url = self.fetch_store_trailer(product)
+                if url and self.validate_video(url):
+                    trailer = self.trailer_resource(url, product, 45)
+                    break
+        return [trailer] if trailer else None
+
+    def fetch_store_trailer(self, product):
+        """Fetch the sample movie url from a DL.Getchu or Gyutto product's item page.
+
+        Args:
+            product: An AVBase product dict.
+
+        Returns:
+            str: The sample movie url, or None for other stores, items without a sample or a failed fetch.
+        """
+        # Both stores are plain pages, so skip FlareSolverr.
+        session = super(AVBase, self).session
+        source = product.get("source")
+        try:
+            if source == "getchu":
+                gcd = extract_dl_id(product.get("image_url")) or extract_dl_id(product.get("url"))
+                if gcd:
+                    return fetch_dl_item(session, gcd).get("trailer_url")
+            elif source == "gyutto":
+                item_id = extract_gyutto_id(product.get("url"))
+                if item_id:
+                    return fetch_gyutto_trailer(session, item_id)
+        except Exception as e:
+            self.logger.warning("Trailer fetch for %s failed: %s", product.get("product_id"), e)
+        return None
+
+    @staticmethod
+    def trailer_resource(url, product, score):
+        """Build a trailer resource with the product's cover as its thumbnail.
+
+        Args:
+            url (str): The sample movie url.
+            product: The AVBase product dict the sample belongs to.
+            score (int): The trailer score.
+
+        Returns:
+            Resource: The trailer.
+        """
+        trailer = Resource(url)
+        trailer.thumb = product.get("image_url") or product.get("thumbnail_url")
+        trailer.score = score
+        return trailer
 
     def hydrate_summary_from_duga(self, work, summary):
         """Return a fuller summary fetched from Duga when `summary` is a truncated teaser.
