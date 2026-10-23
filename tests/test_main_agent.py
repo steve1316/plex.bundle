@@ -330,6 +330,35 @@ class TestPosterSelection(BaseTestCase):
     def test_best_poster_empty(self):
         self.assertIsNone(JAVAgent().pick_best_poster([]))
 
+    def test_is_portrait_accepts_full_size_cover(self):
+        agent = JAVAgent()
+        agent.image_dimensions = lambda url: (532, 800)
+        self.assertTrue(agent.is_portrait(u"jp1"))
+
+    def test_is_portrait_rejects_landscape(self):
+        agent = JAVAgent()
+        agent.image_dimensions = lambda url: (800, 538)
+        self.assertFalse(agent.is_portrait(u"pl"))
+
+    def test_is_portrait_rejects_thumbnail(self):
+        # DMM's `ps.jpg` (147x200) and pixhost thumbs (221x300) are portrait but too small to use as a poster.
+        agent = JAVAgent()
+        agent.image_dimensions = lambda url: (147, 200)
+        self.assertFalse(agent.is_portrait(u"ps"))
+        agent.image_dimensions = lambda url: (221, 300)
+        self.assertFalse(agent.is_portrait(u"pixhost"))
+
+    def test_best_poster_skips_portrait_thumbnail(self):
+        # EBOD-889: a tiny higher-scored `ps.jpg` thumbnail must not beat the full-size `jp-1` portrait.
+        agent = JAVAgent()
+        landscape = self._res(u"pl", 50)
+        jp1 = self._res(u"jp1", 45)
+        ps = self._res(u"ps", 50)
+        dims = {landscape: (2184, 1468), jp1: (532, 800), ps: (147, 200)}
+        agent.image_dimensions = lambda r: dims.get(r)
+        agent.image_size = lambda r: 100
+        self.assertEqual(jp1, agent.pick_best_poster([landscape, jp1, ps]))
+
 
 class TestParseJpegDimensions(BaseTestCase):
     def _jpeg(self, width, height):

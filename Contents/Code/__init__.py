@@ -16,6 +16,9 @@ from agents import BaseAgent, Metadata, MetadataAgent, PartialMetadataAgent, Sea
 
 version = "2026.03.1"
 
+# Portraits shorter than this are thumbnails (DMM `ps.jpg` is 200px, pixhost thumbs 300px), not usable posters.
+MIN_PORTRAIT_POSTER_HEIGHT = 400
+
 
 def Start():
     Log.Info("Starting JAV Agent version %s", version)
@@ -372,19 +375,19 @@ class JAVAgent(Agent.Movies):
             return None
 
     def is_portrait(self, resource):
-        """Return True when the image is a native portrait (taller than wide).
+        """Return True when the image is a full-size native portrait (taller than wide).
 
         A portrait image is a ready-to-use front-cover poster. A landscape image is a wide front+back cover (or a promo
-        montage / scene still) that would need cropping.
+        montage / scene still) that would need cropping. Portrait thumbnails below `MIN_PORTRAIT_POSTER_HEIGHT` do not count.
 
         Args:
             resource: The image resource to check.
 
         Returns:
-            bool: True when the image is portrait-oriented.
+            bool: True when the image is portrait-oriented and at least `MIN_PORTRAIT_POSTER_HEIGHT` tall.
         """
         dims = self.image_dimensions(resource)
-        return bool(dims and dims[0] < dims[1])
+        return bool(dims and dims[0] < dims[1] and dims[1] >= MIN_PORTRAIT_POSTER_HEIGHT)
 
     def pick_best_poster(self, resources):
         """Return the best poster, preferring a native portrait cover over a landscape one.
