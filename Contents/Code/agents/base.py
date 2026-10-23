@@ -1,9 +1,13 @@
 # coding=utf-8
 
 import logging
+import re
 
 import flaresolverr_session
 import requests
+
+# Matches a video filename in a Content-Disposition header, e.g. `attachment; filename="sp-5166-4050758-2App.mp4"`.
+VIDEO_FILENAME_RE = re.compile(r"(?i)filename=\"?[^\";]+\.(?:mp4|m4v|mov|webm|mkv|wmv|avi|flv)\b")
 
 
 class AccessRestrictedError(Exception):
@@ -83,6 +87,46 @@ class BaseAgent(object):
                                 url, expected_mime_type, actual_mime_type)
             return False
         return True
+
+    def validate_video(self, url):
+        """
+        Validate that the resource at the given URL is a video, either by its MIME type or by the filename of a download.
+
+        Some stores serve their sample movies as `application/x-octetstream` attachments, so the filename is checked too.
+
+        Args:
+            url (str): The URL of the resource to validate.
+
+        Returns:
+            bool: True if the resource is a video, False otherwise.
+        """
+        try:
+            resp = requests.head(url, allow_redirects=True)
+            resp.raise_for_status()
+        except Exception as e:
+            self.logger.warning("Failed to validate video %r: %s", url, e)
+            return False
+        if resp.headers.get("Content-Type", "").startswith("video/"):
+            return True
+        if VIDEO_FILENAME_RE.search(resp.headers.get("Content-Disposition", "")):
+            return True
+        self.logger.warning("Resource %r is not a video: %r", url, resp.headers.get("Content-Type", ""))
+        return False
+
+    def first_playable(self, trailers):
+        """
+        Return the highest-scored trailer that is a playable video.
+
+        Args:
+            trailers (list[Resource]): The candidate trailers.
+
+        Returns:
+            Resource: The first trailer that validates, or None when none do.
+        """
+        for trailer in sorted(trailers, key=lambda r: r.score, reverse=True):
+            if self.validate_video(trailer):
+                return trailer
+        return None
 
     requests_session = None  # type: requests.Session
 

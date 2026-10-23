@@ -3,6 +3,8 @@
 
 import unittest
 
+import mock
+
 from base import BaseTestCase
 
 from agents import base
@@ -130,6 +132,34 @@ class TestBaseAgentSession(BaseTestCase):
         # reset flaresolverr_url should clear session
         self.update_prefs(flaresolverr_url="")
         self.assertIsNone(agent.flaresolverr_session)
+
+
+class TestBaseAgentValidateVideo(BaseTestCase):
+
+    def head(self, content_type, disposition=None):
+        resp = mock.Mock()
+        resp.headers = {"Content-Type": content_type}
+        if disposition:
+            resp.headers["Content-Disposition"] = disposition
+        return resp
+
+    def validate(self, resp):
+        agent = BaseAgent(Prefs)
+        agent.name = "Stub"
+        with mock.patch.object(base.requests, "head", return_value=resp):
+            return agent.validate_video(u"https://example.com/sample")
+
+    def test_video_mime_type(self):
+        self.assertTrue(self.validate(self.head("video/mp4")))
+
+    def test_video_attachment(self):
+        self.assertTrue(self.validate(self.head("application/x-octetstream", 'attachment; filename="sp-5166-4050758-2App.mp4"')))
+
+    def test_installer_attachment(self):
+        self.assertFalse(self.validate(self.head("application/x-octetstream", 'attachment; filename="trial.zip"')))
+
+    def test_html_page(self):
+        self.assertFalse(self.validate(self.head("text/html")))
 
 
 class TestMetadataAgentShouldContributeTo(BaseTestCase):
