@@ -477,6 +477,199 @@ class TestParseJpegDimensions(BaseTestCase):
         self.assertNotIn("http://x/scene.jpg", movie.art)
 
 
+class TestBuildNfo(BaseTestCase):
+
+    def _metadata(self):
+        meta = Metadata()
+        meta.title = u"EBOD-889 Tom & Jerry <Special>"
+        meta.japanese_title = u"いきなり"
+        meta.release_date = datetime.date(2022, 1, 14)
+        meta.studio = u"E-BODY"
+        meta.series = u"Harem"
+        meta.duration = 7680000
+        meta.summary = u"A plot."
+        meta.rating = 7.7
+        meta.genres = {u"Big Tits"}
+        meta.labels = {u"E-BODY Label"}
+        director = Person(u"Samoari")
+        meta.directors = [director]
+        actress = Person(u"Yuria Yoshine")
+        actress.japanese_name = u"吉根ゆりあ"
+        actress.photo = Resource(u"http://x/yoshine.jpg")
+        meta.actresses = [actress]
+        meta.trailers = [Resource(u"http://x/trailer.mp4")]
+        return meta
+
+    def test_fields_written_and_escaped(self):
+        nfo = _main.build_nfo(self._metadata(), "ja", u"EBOD-889", u"http://x/pl.jpg").decode("utf-8")
+        self.assertTrue(nfo.startswith(u'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<movie>\n'))
+        self.assertIn(u"    <title>EBOD-889 Tom &amp; Jerry &lt;Special&gt;</title>\n", nfo)
+        self.assertIn(u"    <originaltitle>いきなり</originaltitle>\n", nfo)
+        self.assertIn(u"    <id>EBOD-889</id>\n", nfo)
+        self.assertIn(u"    <premiered>2022-01-14</premiered>\n", nfo)
+        self.assertIn(u"    <year>2022</year>\n", nfo)
+        self.assertIn(u"    <director>Samoari</director>\n", nfo)
+        self.assertIn(u"    <studio>E-BODY</studio>\n", nfo)
+        self.assertIn(u"    <rating>7.7</rating>\n", nfo)
+        self.assertIn(u"    <plot>A plot.</plot>\n", nfo)
+        self.assertIn(u"    <runtime>128</runtime>\n", nfo)
+        self.assertIn(u"    <trailer>http://x/trailer.mp4</trailer>\n", nfo)
+        self.assertIn(u"    <mpaa>XXX</mpaa>\n", nfo)
+        self.assertIn(u"    <set>Harem</set>\n", nfo)
+        self.assertIn(u"    <thumb>http://x/pl.jpg</thumb>\n", nfo)
+        self.assertIn(u"    <genre>Big Tits</genre>\n", nfo)
+        self.assertIn(u"    <tag>E-BODY Label</tag>\n", nfo)
+        self.assertIn(u"    <actor>\n        <name>Yuria Yoshine</name>\n        <altname>吉根ゆりあ</altname>\n"
+                      u"        <thumb>http://x/yoshine.jpg</thumb>\n        <role>吉根ゆりあ</role>\n    </actor>\n", nfo)
+        self.assertTrue(nfo.endswith(u"</movie>\n"))
+
+    def test_empty_fields_written_as_empty_elements(self):
+        meta = Metadata()
+        meta.title = u"T"
+        nfo = _main.build_nfo(meta, "ja", u"ABC-123", None).decode("utf-8")
+        self.assertIn(u"    <originaltitle></originaltitle>\n", nfo)
+        self.assertIn(u"    <runtime></runtime>\n", nfo)
+        self.assertIn(u"    <thumb></thumb>\n", nfo)
+        self.assertNotIn(u"<actor>", nfo)
+        self.assertNotIn(u"<genre>", nfo)
+
+
+class TestGridDifference(BaseTestCase):
+
+    def test_mean_absolute_difference(self):
+        self.assertEqual(2.0, _main.grid_difference([0, 10], [2, 8]))
+
+    def test_none_when_a_grid_is_missing(self):
+        self.assertIsNone(_main.grid_difference(None, [1]))
+        self.assertIsNone(_main.grid_difference([1], None))
+
+
+class TestFolderMatchesCode(BaseTestCase):
+
+    def test_matches(self):
+        self.assertTrue(_main.folder_matches_code(u"/Library/r18 jav/DANDY-149", u"DANDY-149"))
+        self.assertTrue(_main.folder_matches_code(u"/Library/r18 jav/EBOD-889 [E-body] - Suddenly (2022)", u"EBOD-889"))
+        self.assertTrue(_main.folder_matches_code(u"/Library/r18 jav/230OREMO-042", u"OREMO-042"))
+        self.assertTrue(_main.folder_matches_code(u"/Library/r18 jav/ebod889", u"EBOD-889"))
+
+    def test_rejects_other_folders(self):
+        self.assertFalse(_main.folder_matches_code(u"/Library/r18 jav", u"DANDY-149"))
+        self.assertFalse(_main.folder_matches_code(u"/Library/r18 jav/DANDY-150", u"DANDY-149"))
+        self.assertFalse(_main.folder_matches_code(u"/Library/r18 jav/DANDY-149", None))
+
+
+class TestSaveLocalFiles(BaseTestCase):
+
+    FOLDER = u"/Library/r18 jav/EBOD-889 [E-body]"
+
+    def _agent(self, images=None):
+        agent = JAVAgent()
+        self.writes = {}
+        self.replaced = []
+        agent.write_file = lambda path, data: self.writes.__setitem__(path, data)
+        agent.replace_dir = lambda path: self.replaced.append(path)
+        images = images or {}
+        agent.download_image = lambda url: images.get(url)
+        agent.image_grid = lambda data, front_only=False: None
+        return agent
+
+    def _res(self, url, score):
+        r = Resource(url)
+        r.score = score
+        return r
+
+    def _save(self, agent, meta, folder=None):
+        agent.save_local_files((folder or self.FOLDER) + u"/EBOD-889.mp4", u"EBOD-889", meta, "ja", "poster-bytes", "art-bytes", u"http://x/pl.jpg")
+
+    def test_writes_poster_fanart_and_nfo(self):
+        agent = self._agent()
+        meta = Metadata()
+        meta.title = u"T"
+        self._save(agent, meta)
+        self.assertEqual("poster-bytes", self.writes[self.FOLDER + u"/folder.jpg"])
+        self.assertEqual("art-bytes", self.writes[self.FOLDER + u"/fanart.jpg"])
+        self.assertIn(u"<id>EBOD-889</id>", self.writes[self.FOLDER + u"/EBOD-889.nfo"].decode("utf-8"))
+        # No samples or actress photos found -> existing folders left alone.
+        self.assertEqual([], self.replaced)
+
+    def test_skips_missing_image_bytes(self):
+        agent = self._agent()
+        meta = Metadata()
+        meta.title = u"T"
+        agent.save_local_files(self.FOLDER + u"/EBOD-889.mp4", u"EBOD-889", meta, "ja", None, None, None)
+        self.assertNotIn(self.FOLDER + u"/folder.jpg", self.writes)
+        self.assertNotIn(self.FOLDER + u"/fanart.jpg", self.writes)
+
+    def test_extrafanart_largest_first_and_look_alikes_dropped(self):
+        images = {u"http://x/s1.jpg": "aa", u"http://x/s2.jpg": "bbbb", u"http://x/s3.jpg": "ccc", u"http://x/dup.jpg": "ddddd"}
+        agent = self._agent(images)
+        # dup.jpg (largest) looks like s2.jpg, so s2.jpg is the one dropped.
+        grids = {"ddddd": [0, 0, 0, 0], "bbbb": [1, 1, 1, 1], "ccc": [200, 200, 200, 200], "aa": [100, 100, 100, 100]}
+        agent.image_grid = lambda data, front_only=False: grids.get(data)
+        meta = Metadata()
+        meta.title = u"T"
+        cover = self._res(u"http://x/pl.jpg", 50)
+        fallback = self._res(u"http://x/pixhost.jpg", 45)
+        meta.art = [cover, fallback] + [self._res(u, 30) for u in (u"http://x/s1.jpg", u"http://x/s2.jpg", u"http://x/s3.jpg", u"http://x/dup.jpg")]
+        self._save(agent, meta)
+        extra = self.FOLDER + u"/extrafanart"
+        self.assertEqual([extra], self.replaced)
+        self.assertEqual("ddddd", self.writes[extra + u"/fanart1.jpg"])
+        self.assertEqual("ccc", self.writes[extra + u"/fanart2.jpg"])
+        self.assertEqual("aa", self.writes[extra + u"/fanart3.jpg"])
+        self.assertNotIn(extra + u"/fanart4.jpg", self.writes)
+
+    def test_actor_photos_use_underscored_names(self):
+        agent = self._agent({u"http://x/yoshine.jpg": "photo"})
+        meta = Metadata()
+        meta.title = u"T"
+        with_photo = Person(u"Yuria Yoshine")
+        with_photo.photo = Resource(u"http://x/yoshine.jpg")
+        without_photo = Person(u"No Photo")
+        meta.actresses = [with_photo, without_photo]
+        self._save(agent, meta)
+        actors = self.FOLDER + u"/.actors"
+        self.assertEqual([actors], self.replaced)
+        self.assertEqual("photo", self.writes[actors + u"/Yuria_Yoshine.jpg"])
+        self.assertNotIn(actors + u"/No_Photo.jpg", self.writes)
+
+    def test_folder_without_code_writes_nothing(self):
+        agent = self._agent()
+        meta = Metadata()
+        meta.title = u"T"
+        self._save(agent, meta, folder=u"/Library/r18 jav")
+        self.assertEqual({}, self.writes)
+        self.assertEqual([], self.replaced)
+
+
+class TestApplyMetadataSavesLocalFiles(BaseTestCase):
+
+    def _apply(self, agent):
+        meta = Metadata()
+        meta.title = u"T"
+        agent.apply_metadata(Movie(), meta, "ja", media_path=u"/Library/r18 jav/EBOD-889/EBOD-889.mp4", video_code=u"EBOD-889")
+
+    def test_saves_when_pref_on(self):
+        self.update_prefs(save_local_files=True)
+        agent = JAVAgent()
+        agent.save_local_files = mock.MagicMock()
+        self._apply(agent)
+        self.assertEqual(1, agent.save_local_files.call_count)
+
+    def test_skips_when_pref_off(self):
+        self.update_prefs(save_local_files=False)
+        agent = JAVAgent()
+        agent.save_local_files = mock.MagicMock()
+        self._apply(agent)
+        self.assertEqual(0, agent.save_local_files.call_count)
+
+    def test_write_failure_does_not_break_update(self):
+        self.update_prefs(save_local_files=True)
+        agent = JAVAgent()
+        agent.save_local_files = mock.MagicMock(side_effect=IOError("read-only"))
+        self._apply(agent)
+
+
 class TestJAVAgentSearch(BaseTestCase):
 
     def _make_agent(self, mock_agents):

@@ -6,6 +6,12 @@
         "default": true
     },
     {
+        "id": "save_local_files",
+        "label": "Save poster, fanart, extrafanart, actress photos and NFO to the media folder",
+        "type": "bool",
+        "default": true
+    },
+    {
         "id": "geo_proxy",
         "label": "Geo proxy for DMM/MGStage (e.g. http://user:pass@jp-node:18080)",
         "type": "text",
