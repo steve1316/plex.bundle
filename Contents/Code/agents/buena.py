@@ -152,6 +152,12 @@ class Buena(SearchAgent, MetadataAgent):
     # the instance the first time it is built, shadowing this class default.
     index = None
 
+    # Whether every catalog page loaded when the index was built. An incomplete index is rebuilt on the next call.
+    index_complete = False
+
+    # Number of failed page fetches, used to tell whether an index build saw every page.
+    fetch_failures = 0
+
     # AVBase agent used to backfill fields from the FANZA cross-ref codes, built on first use.
     avbase = None
 
@@ -342,11 +348,12 @@ class Buena(SearchAgent, MetadataAgent):
         """Fetch and parse the catalog pages once, caching the result.
 
         POW is indexed first so that POW-NNN codes resolve to the dedicated POW entries rather than a BUENA cross-reference. The
-        buenap rows on /buena/ are merged into their POW entry. Cached for the process lifetime once non-empty.
+        buenap rows on /buena/ are merged into their POW entry. Cached for the process lifetime once every page loaded.
         """
-        if self.index is not None:
+        if self.index is not None and self.index_complete:
             return
 
+        failures = self.fetch_failures
         index = {}
         for entry in self.parse_pow_page():
             for key in entry.code_keys:
@@ -364,8 +371,8 @@ class Buena(SearchAgent, MetadataAgent):
             for key in entry.code_keys:
                 index.setdefault(key, target)
 
-        if index:
-            self.index = index
+        self.index = index
+        self.index_complete = bool(index) and self.fetch_failures == failures
         self.logger.debug("Indexed %d BUENA/POW codes", len(index))
 
     def merge_into_pow(self, pow_entry, entry):
@@ -404,6 +411,7 @@ class Buena(SearchAgent, MetadataAgent):
         except AccessRestrictedError:
             raise
         except Exception as e:
+            self.fetch_failures = self.fetch_failures + 1
             if warn:
                 self.logger.warning("Failed to fetch %s: %s", url, e)
             return None

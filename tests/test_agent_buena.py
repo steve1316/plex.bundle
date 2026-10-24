@@ -5,7 +5,10 @@ from base import AgentTestCase
 import datetime
 import unittest
 
+import mock
+
 from agents import Buena
+from agents.buena import POW_URL
 
 
 class TestBuenaAgent(AgentTestCase):
@@ -152,6 +155,23 @@ class TestBuenaAgent(AgentTestCase):
         self.assertTrue(metadata.summary)
         self.assertTrue([p for p in metadata.posters if u"/pow023/pow023jp.jpg" in p])
         self.assertTrue(metadata.trailers)
+
+    def test_index_rebuilt_after_failed_page(self):
+        # an index built while a page failed is not cached, so the next call fetches it again
+        get = self.agent.session.get
+
+        def fail_pow(url, *args, **kwargs):
+            if url == POW_URL:
+                raise IOError("Try again")
+            return get(url, *args, **kwargs)
+
+        with mock.patch.object(self.agent.session, "get", side_effect=fail_pow):
+            self.agent.ensure_index()
+        partial = len(self.agent.index)
+        self.assertFalse(self.agent.index_complete)
+        self.agent.ensure_index()
+        self.assertTrue(self.agent.index_complete)
+        self.assertGreater(len(self.agent.index), partial)
 
     def test_metadata_actressless_entry(self):
         # an entry with an empty 【】 header still resolves with no cast
