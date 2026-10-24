@@ -154,6 +154,18 @@ class TestLlmTranslate(BaseTestCase):
         self.translate(meta, [u"Celebrity Saori Hara"])
         self.assertIsNone(meta.title)
 
+    def test_known_english_title_not_sent(self):
+        # An agent that already knows the English title, e.g. BUENA from konodare slugs, overrides the model.
+        meta = Metadata()
+        meta.japanese_title = u"[BUENA-106] マシュ･キリエライト (Fate)"
+        meta.english_title = u"Mash Kyrielight (Fate)"
+        meta.summary = u"説明"
+        with mock.patch.object(self.agent, "call_ollama", return_value={"title": u"Mash & Kirie Light (Fate)", "summary": u"Text"}) as call:
+            self.agent.llm_translate(u"BUENA-106", meta, "ja")
+        self.assertNotIn(u"マシュ", call.call_args[0][2])
+        self.assertEqual(u"BUENA-106 Mash Kyrielight (Fate)", meta.title)
+        self.assertEqual(u"Text\n\n説明", meta.summary)
+
 
 if __name__ == "__main__":
     unittest.main()

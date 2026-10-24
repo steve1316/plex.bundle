@@ -52,6 +52,51 @@ BUENA_KEY_RE = re.compile(r"^BUENA(\d+)$")
 # The leading code and the trailing full-width bracket tag (e.g. "[cosplay]") around a Getchu product title.
 GETCHU_TITLE_RE = re.compile(u"(?i)^\\s*buena\\d+\\s*|\\s*\uff3b[^\uff3d]*\uff3d\\s*$")
 
+# English names for konodare cosplay slugs that do not read well when title-cased, keyed by the slug path after `/cosplay/` or by the
+# last slug. A path key also fixes a few links konodare got wrong, e.g. Sakura Miko filed as `hololive/himiko-toga`.
+SLUG_NAMES = {
+    u"2b": u"2B",
+    u"25ririsa": u"2.5 Dimensional Seduction",
+    u"alice-nikke": u"Alice",
+    u"ame-chan": u"Ame-chan",
+    u"atelier": u"Atelier Ryza",
+    u"bocchi-the-rock": u"Bocchi the Rock!",
+    u"cho-ten-chan": u"Chouten-chan",
+    u"dead-or-alive": u"Dead or Alive",
+    u"frieren-the-slayer": u"Frieren: Beyond Journey's End",
+    u"general/bunny": u"Reverse Bunny",
+    u"general/school": u"Schoolgirl",
+    u"genshin": u"Genshin Impact",
+    u"hololive/himiko-toga": u"Miko Sakura",
+    u"idolmaster": u"The Idolmaster",
+    u"jack-the-ripper": u"Jack the Ripper",
+    u"jeanne-darc": u"Jeanne d'Arc",
+    u"kizuna-ai": u"Kizuna AI",
+    u"love-chunibyo": u"Love, Chunibyo & Other Delusions",
+    u"my-dress-up-darling": u"My Dress-Up Darling",
+    u"my-favorite-idol": u"Oshi no Ko",
+    u"nikke": u"Goddess of Victory: Nikke",
+    u"re-zero": u"Re:Zero - Starting Life in Another World",
+    u"reincarnated-slime": u"That Time I Got Reincarnated as a Slime",
+    u"spy-family": u"Spy x Family",
+    u"strawberry-100": u"Strawberry 100%",
+    u"tamamo-mae": u"Tamamo-no-Mae",
+    u"ulrich-von-hutten": u"Ulrich von Hutten",
+    u"vtuber": u"VTuber",
+}
+
+# A cosplay slug that can be title-cased into a name, e.g. "mash-kyrielight".
+SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+# The Azur Lane faction in front of a character slug, e.g. "royal-navy-" in "royal-navy-sirius".
+FACTION_PREFIX_RE = re.compile(r"^(?:royal-navy|sakura-empire|eagle-union|iron-blood|dragon-empery|northern-parliament|vichya-dominion|iris-libre|sardegna-empire)-")
+
+# Link text that is already plain ASCII, e.g. "Fate/Grand Order".
+ASCII_TEXT_RE = re.compile(r"^[ -~]+$")
+
+# A number at the end of the link text that the slug drops, e.g. the 7 in "ファイナルファンタジー7".
+TRAILING_NUMBER_RE = re.compile(r"(\d+)$")
+
 # Placeholders konodare uses for an empty cell or an unknown actress.
 DASHES = (u"-", u"–", u"—", u"−", u"―")
 
@@ -75,6 +120,33 @@ def normalize_code(code):
     if m:
         return m.group(1) + m.group(2) + m.group(3)
     return s
+
+
+def slug_name(path, text):
+    """Return the English name of a konodare `/cosplay/` link.
+
+    Link text that is already ASCII is kept. Otherwise the last slug is title-cased, e.g. `mash-kyrielight` to "Mash Kyrielight", with
+    `SLUG_NAMES` covering the slugs that do not read well that way.
+
+    Args:
+        path (list[str]): The href segments after `cosplay`, e.g. ["fate", "mash-kyrielight"].
+        text (str): The link text.
+
+    Returns:
+        str or None: The English name, or None when the slug is missing or not plain ASCII.
+    """
+    if text and ASCII_TEXT_RE.match(text):
+        return text
+    if not path or not SLUG_RE.match(path[-1]):
+        return None
+    slug = path[-1]
+    name = SLUG_NAMES.get(u"/".join(path)) or SLUG_NAMES.get(slug)
+    if not name:
+        name = u" ".join(word.capitalize() for word in FACTION_PREFIX_RE.sub(u"", slug).split(u"-"))
+    m = TRAILING_NUMBER_RE.search(text or u"")
+    if m and not name.endswith(m.group(1)):
+        name = u"%s %s" % (name, m.group(1))
+    return name
 
 
 def cid_to_code(cid):
@@ -101,6 +173,8 @@ class Entry(object):
         self.actresses = []         # list of (name, reading) tuples
         self.character = None       # cosplay character name (BUENA)
         self.series = None          # source work name (BUENA)
+        self.character_en = None    # English character name from the cosplay slug
+        self.series_en = None       # English work name from the cosplay slug
         self.studio = u"BUENA"      # "POW" for POW entries / POW-labelled BUENA
         self.release_date = None    # datetime (POW entries)
         self.amateur_code = None    # e.g. "ZARJ-070" or "POW-023"
@@ -209,6 +283,7 @@ class Buena(SearchAgent, MetadataAgent):
         metadata.title = title
         metadata.japanese_title = title
         metadata.title_sort = title
+        metadata.english_title = self.build_english_title(entry)
 
         metadata.studio = entry.studio
         if entry.series:
@@ -772,11 +847,13 @@ class Buena(SearchAgent, MetadataAgent):
             segments = [s for s in a.get("href", "").split("/") if s]
             if "cosplay" not in segments:
                 continue
-            depth = len(segments) - segments.index("cosplay") - 1
-            if depth >= 2 and not entry.character:
+            path = segments[segments.index("cosplay") + 1:]
+            if len(path) >= 2 and not entry.character:
                 entry.character = text
-            elif depth == 1 and not entry.series:
+                entry.character_en = slug_name(path, text)
+            elif len(path) == 1 and not entry.series:
                 entry.series = text
+                entry.series_en = slug_name(path, text)
 
     def fetch_detail_entry(self, code):
         """Fetch and parse a konodare per-item detail page for `code`.
@@ -916,6 +993,25 @@ class Buena(SearchAgent, MetadataAgent):
         if inner:
             return u"[%s] %s" % (entry.code, inner)
         return u"[%s]" % entry.code
+
+    def build_english_title(self, entry):
+        """Build the English title `character (series)` from the cosplay slugs, without the code.
+
+        Args:
+            entry (Entry): The catalog entry.
+
+        Returns:
+            str or None: The English title, or None when a name has no usable slug or the entry has no cosplay links.
+        """
+        if entry.character and entry.series:
+            if entry.character_en and entry.series_en:
+                return u"%s (%s)" % (entry.character_en, entry.series_en)
+            return None
+        if entry.character:
+            return entry.character_en
+        if entry.series:
+            return entry.series_en
+        return None
 
     def build_images(self, entry):
         """Build poster and art `Resource` lists from the FANZA covers.

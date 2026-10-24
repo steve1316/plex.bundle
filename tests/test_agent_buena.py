@@ -8,7 +8,7 @@ import unittest
 import mock
 
 from agents import Buena
-from agents.buena import POW_URL
+from agents.buena import POW_URL, slug_name
 
 
 class TestBuenaAgent(AgentTestCase):
@@ -149,6 +149,17 @@ class TestBuenaAgent(AgentTestCase):
         metadata = self.agent.get_metadata(u"BUENA-082", u"BUENA-082", "ja")
         self.assertStudioIs(u"POW", metadata)
 
+    def test_metadata_english_title(self):
+        # the English title comes from the konodare cosplay slugs, so the model does not guess the character names
+        cases = [
+            (u"BUENA-075", u"Milim Nava (That Time I Got Reincarnated as a Slime)"),
+            (u"BUENA-084", u"Tifa Lockhart (Final Fantasy 7)"),
+            (u"BUENA-216", u"Sirius (Azur Lane)"),
+            (u"BUENA-273", u"Suisei Hoshimachi (Hololive)"),
+        ]
+        for code, title in cases:
+            self.assertEqual(title, self.agent.get_metadata(code, code, "ja").english_title)
+
     def test_metadata_buenap_media_row(self):
         # BUENA-084's media row starts with buenap023, which still belongs to BUENA-084 rather than a new entry
         metadata = self.agent.get_metadata(u"BUENA-084", u"BUENA-084", "ja")
@@ -209,6 +220,30 @@ class TestBuenaAgent(AgentTestCase):
         self.assertTrue(metadata.summary)
         self.assertNotIn(u"ダウンロード", metadata.summary)
         self.assertGenresInclude([u"ケモミミ"], metadata)
+
+
+class TestSlugName(unittest.TestCase):
+
+    def test_title_cased_slug(self):
+        self.assertEqual(u"Mash Kyrielight", slug_name([u"fate", u"mash-kyrielight"], u"マシュ･キリエライト"))
+
+    def test_ascii_text_kept(self):
+        self.assertEqual(u"Fate/Grand Order", slug_name([u"fate"], u"Fate/Grand Order"))
+
+    def test_faction_prefix_dropped(self):
+        self.assertEqual(u"Sirius", slug_name([u"azur-lane", u"royal-navy-sirius"], u"シリアス"))
+
+    def test_override(self):
+        self.assertEqual(u"Kizuna AI", slug_name([u"vtuber", u"kizuna-ai"], u"キズナアイ"))
+        self.assertEqual(u"Miko Sakura", slug_name([u"hololive", u"himiko-toga"], u"さくらみこ"))
+        self.assertEqual(u"Himiko Toga", slug_name([u"my-hero-academia", u"himiko-toga"], u"トガヒミコ"))
+
+    def test_trailing_number_kept(self):
+        self.assertEqual(u"Final Fantasy 7", slug_name([u"final-fantasy"], u"ファイナルファンタジー7"))
+
+    def test_unusable_slug(self):
+        self.assertIsNone(slug_name([], u"レム"))
+        self.assertIsNone(slug_name([u"%E3%83%AC%E3%83%A0"], u"レム"))
 
 
 if __name__ == "__main__":

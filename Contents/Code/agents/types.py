@@ -22,6 +22,7 @@ class Metadata(object):
         code_group (str): The code group of the video, e.g. "ABC" for "ABC-123"
         title (str): The title of the movie
         japanese_title (str): The Japanese title of the movie
+        english_title (str): An English title without the video code that an agent already knows, used instead of a translation
         release_date (datetime.date): The release date of the movie
         studio (str): The studio that produced the movie
         series (str): The series the movie belongs to
@@ -43,6 +44,7 @@ class Metadata(object):
 
     title = None  # type: str
     japanese_title = None  # type: str
+    english_title = None  # type: str
     release_date = None  # type: datetime.date
     studio = None  # type: str
     series = None  # type: str

@@ -169,7 +169,11 @@ class Translate(PartialMetadataAgent):
 
         # Build the input payload with fields to translate
         input_data = {}
-        if metadata.japanese_title:
+        if metadata.english_title:
+            # An agent already knows the English title, so the model does not guess the names in it.
+            metadata.title = u"{0} {1}".format(video_code, metadata.english_title)
+            metadata.title_sort = metadata.title
+        elif metadata.japanese_title:
             title = metadata.japanese_title
             parts = title.split(" ", 1)
             if len(parts) > 1 and "-" in parts[0]:
