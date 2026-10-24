@@ -4,7 +4,7 @@ import datetime
 import json
 import re
 
-from .duga import extract_product_id, fetch_description, sample_movie_url
+from .duga import extract_product_id, fetch_description, sample_image_url, sample_movie_url
 from .base import MetadataAgent, SearchAgent
 from .getchu import extract_dl_id, extract_gyutto_id, fetch_dl_item, fetch_gyutto_trailer
 from .types import Metadata, Person, Resource, SearchItem
@@ -214,7 +214,7 @@ class AVBase(SearchAgent, MetadataAgent):
             for sample in samples:
                 large_url = sample.get("l", "")
                 if large_url:
-                    sample_art = Resource(large_url)
+                    sample_art = Resource(sample_image_url(large_url))
                     sample_art.score = 30
                     art_list.append(sample_art)
 

@@ -78,6 +78,18 @@ class TestSampleMovieUrl(BaseTestCase):
         self.assertIsNone(duga.sample_movie_url(None))
 
 
+class TestSampleImageUrl(BaseTestCase):
+    def test_old_cap_path(self):
+        self.assertEqual(u"https://pic.duga.jp/unsecure/dandy/0069/noauth/scap/001.jpg", duga.sample_image_url(u"https://pic.duga.jp/unsecure/dandy/0069/cap/001.jpg"))
+        self.assertEqual(u"https://pic.duga.jp/unsecure/sun/0095/noauth/scap/001.jpg", duga.sample_image_url(u"https://pic.duga.jp/unsecure/sun/0095/cap/0001.jpg"))
+
+    def test_other_urls_unchanged(self):
+        url = u"https://pic.duga.jp/unsecure/dandy/0069/noauth/scap/001.jpg"
+        self.assertEqual(url, duga.sample_image_url(url))
+        url = u"https://pics.dmm.co.jp/digital/video/dandy149/dandy149jp-1.jpg"
+        self.assertEqual(url, duga.sample_image_url(url))
+
+
 # ---------------------------------------------------------------------------
 # parse_description
 # ---------------------------------------------------------------------------

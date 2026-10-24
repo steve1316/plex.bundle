@@ -15,6 +15,9 @@ PRODUCT_ID_RE = re.compile(r"/ppv/([^/?]+)")
 # Duga serves each product's sample movie at a fixed path built from the label and number of its id (e.g. "scocci-0170").
 SAMPLE_MOVIE_URL = "https://flv.duga.jp/unsecure/{label}/{number}/noauth/temp.mp4"
 
+# Matches the old sample image path AVBase still lists (e.g. ".../dandy/0069/cap/001.jpg"), which Duga now serves under "noauth/scap/".
+OLD_SAMPLE_IMAGE_RE = re.compile(r"^(https?://pic\.duga\.jp/unsecure/[^/]+/[^/]+)/cap/(\d+)\.jpg$")
+
 
 def extract_product_id(url):
     """Return the Duga product id from a Duga product or click url.
@@ -46,6 +49,21 @@ def sample_movie_url(product_id):
         return None
     label, number = product_id.rsplit("-", 1)
     return SAMPLE_MOVIE_URL.format(label=label, number=number)
+
+
+def sample_image_url(url):
+    """Return the current url of a Duga sample image.
+
+    Args:
+        url: A sample image url (str), e.g. from AVBase.
+
+    Returns:
+        str: The `noauth/scap/` url for an old Duga `cap/` url, or the url unchanged for anything else.
+    """
+    match = OLD_SAMPLE_IMAGE_RE.match(url)
+    if not match:
+        return url
+    return u"{0}/noauth/scap/{1:03d}.jpg".format(match.group(1), int(match.group(2)))
 
 
 def fetch_description(session, product_id, raise_for_status=None):
