@@ -113,6 +113,27 @@ class BaseAgent(object):
         self.logger.warning("Resource %r is not a video: %r", url, resp.headers.get("Content-Type", ""))
         return False
 
+    def validate_playlist(self, url):
+        """
+        Validate that the resource at the given URL is an HLS playlist.
+
+        Args:
+            url (str): The URL of the playlist to validate.
+
+        Returns:
+            bool: True if the resource starts with the `#EXTM3U` header, False otherwise.
+        """
+        try:
+            resp = requests.get(url)
+            resp.raise_for_status()
+        except Exception as e:
+            self.logger.warning("Failed to validate playlist %r: %s", url, e)
+            return False
+        if resp.content.startswith("#EXTM3U"):
+            return True
+        self.logger.warning("Resource %r is not a playlist", url)
+        return False
+
     def first_playable(self, trailers):
         """
         Return the highest-scored trailer that is a playable video.

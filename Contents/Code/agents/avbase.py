@@ -7,6 +7,7 @@ import re
 from .duga import extract_product_id, fetch_description, sample_image_url, sample_movie_url
 from .base import MetadataAgent, SearchAgent
 from .getchu import extract_dl_id, extract_gyutto_id, fetch_dl_item, fetch_gyutto_trailer
+from .javtrailers import mirror_url
 from .types import Metadata, Person, Resource, SearchItem
 from .utils import br_to_newlines, get_code_group, guess_video_code
 
@@ -245,7 +246,7 @@ class AVBase(SearchAgent, MetadataAgent):
         """Return the first playable sample movie among the work's products.
 
         FANZA products carry a direct sample url, and Duga's is built from its product id. The DL.Getchu and Gyutto item pages are
-        only fetched when none of those plays.
+        only fetched when none of those plays. The JavTrailers mirror of a geo-blocked FANZA sample is the last resort.
 
         Args:
             work: The AVBase work dict.
@@ -268,6 +269,15 @@ class AVBase(SearchAgent, MetadataAgent):
                 url = self.fetch_store_trailer(product)
                 if url and self.validate_video(url):
                     trailer = self.trailer_resource(url, product, 45)
+                    break
+
+        if trailer is None:
+            for candidate in candidates:
+                url = mirror_url(candidate)
+                if url and self.validate_playlist(url):
+                    trailer = Resource(url)
+                    trailer.thumb = candidate.thumb
+                    trailer.score = 25
                     break
         return [trailer] if trailer else None
 

@@ -162,6 +162,23 @@ class TestBaseAgentValidateVideo(BaseTestCase):
         self.assertFalse(self.validate(self.head("text/html")))
 
 
+class TestBaseAgentValidatePlaylist(BaseTestCase):
+
+    def validate(self, content):
+        resp = mock.Mock()
+        resp.content = content
+        agent = BaseAgent(Prefs)
+        agent.name = "Stub"
+        with mock.patch.object(base.requests, "get", return_value=resp):
+            return agent.validate_playlist(u"https://example.com/playlist.m3u8")
+
+    def test_hls_playlist(self):
+        self.assertTrue(self.validate("#EXTM3U\n#EXT-X-VERSION:3\n"))
+
+    def test_html_page(self):
+        self.assertFalse(self.validate("<html></html>"))
+
+
 class TestMetadataAgentShouldContributeTo(BaseTestCase):
 
     def setUp(self):
