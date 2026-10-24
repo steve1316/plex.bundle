@@ -1137,6 +1137,8 @@ def build_folder_name(metadata, lang, video_code, code=None):
         return None
     if title.upper().startswith(video_code.upper()):
         title = title[len(video_code):]
+    elif title.upper().startswith(u"[" + video_code.upper() + u"]"):
+        title = title[len(video_code) + 2:]
     title = clean_folder_text(title)
     if not title:
         return None

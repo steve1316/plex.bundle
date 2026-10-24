@@ -784,6 +784,9 @@ class TestBuildFolderName(BaseTestCase):
     def test_title_without_code_prefix(self):
         self.assertEqual(u"DANDY-149 [DANDY] - The Temptation (2009)", _main.build_folder_name(self._metadata(u"The Temptation"), "ja", u"DANDY-149"))
 
+    def test_bracketed_code_prefix(self):
+        self.assertEqual(u"DANDY-149 [DANDY] - The Temptation (2009)", _main.build_folder_name(self._metadata(u"[DANDY-149] The Temptation"), "ja", u"DANDY-149"))
+
     def test_slashes_and_illegal_characters(self):
         meta = self._metadata(u'DANDY-149 Hygienist/Nurse: Why? "Yes" <3 a|b\\c*')
         self.assertEqual(u"DANDY-149 [DANDY] - Hygienist-Nurse Why Yes 3 ab-c (2009)", _main.build_folder_name(meta, "ja", u"DANDY-149"))
