@@ -330,10 +330,12 @@ class JAVAgent(Agent.Movies):
             if art_data is not None:
                 movie.art[best_art] = Proxy.Media(art_data)
 
-        if metadata.trailers:
+        remote_trailer = metadata.trailers[0] if metadata.trailers else None
+        trailer_file = self.local_trailer(media_path, video_code, remote_trailer) or remote_trailer
+        if trailer_file:
             trailer = TrailerObject(
-                file=self.local_trailer(media_path, video_code, metadata.trailers[0]) or metadata.trailers[0],
-                thumb=metadata.trailers[0].thumb
+                file=trailer_file,
+                thumb=remote_trailer.thumb if remote_trailer else None
             )
             movie.extras.add(trailer)
 
@@ -407,28 +409,32 @@ class JAVAgent(Agent.Movies):
         Log.Info("Saved local files to %s", folder)
 
     def local_trailer(self, media_path, video_code, trailer):
-        """Return the path of a local mp4 copy of an HLS trailer, saving it next to the video first when it is missing.
+        """Return the path of a trailer file next to the video, saving an HLS trailer there first when there is none.
 
-        Plex has to transcode a remote HLS trailer on every play and seek, while a local mp4 plays directly. Other trailers are
-        already mp4 files, so they are left remote.
+        A trailer already in the folder (e.g. from another scraper) wins over any remote one. Plex has to transcode a remote HLS
+        trailer on every play and seek, while a local mp4 plays directly. Other remote trailers are already mp4 files, so they are
+        left remote.
 
         Args:
             media_path (str): Path of the video file, or None.
             video_code (str): The video code, e.g. "SUN-045".
-            trailer (Resource): The trailer url.
+            trailer (Resource): The remote trailer url, or None.
 
         Returns:
-            str: The path of `<video name>-trailer.mp4`, or None when the trailer is not HLS, local files are off or saving failed.
+            str: The path of the local trailer, or None when there is none and the remote trailer is not HLS or could not be saved.
         """
-        if not Prefs["save_local_files"] or not media_path or not trailer.split("?")[0].endswith(".m3u8"):
+        if not media_path:
             return None
         if isinstance(media_path, str):
             media_path = media_path.decode("utf-8")
+        existing = self.existing_trailer(media_path, video_code)
+        if existing:
+            return existing
+        if not trailer or not Prefs["save_local_files"] or not trailer.split("?")[0].endswith(".m3u8"):
+            return None
         if not folder_matches_code(os.path.dirname(media_path), video_code):
             return None
         path = os.path.splitext(media_path)[0] + u"-trailer.mp4"
-        if self.path_exists(path):
-            return path
         try:
             self.save_hls(trailer, path)
         except Exception as e:
@@ -436,6 +442,44 @@ class JAVAgent(Agent.Movies):
             return None
         Log.Info(u"Saved trailer {0} to {1}".format(trailer, path))
         return path
+
+    def existing_trailer(self, media_path, video_code):
+        """Return the `*-trailer.mp4` file next to the video that is named after the video or its code.
+
+        Case and punctuation are ignored, so `pow-025-trailer.mp4` matches `POW-025.mp4` and `STAR-189-trailer.mp4` matches
+        `STAR-189-ub.mp4`.
+
+        Args:
+            media_path (str): Path of the video file.
+            video_code (str): The video code, e.g. "POW-025".
+
+        Returns:
+            str: The trailer path, or None when the folder has no matching trailer or cannot be listed.
+        """
+        folder = os.path.dirname(media_path)
+        keys = (code_key(os.path.splitext(os.path.basename(media_path))[0]), code_key(video_code))
+        try:
+            names = sorted(self.list_dir(folder))
+        except Exception as e:
+            Log.Warn(u"Failed to list {0}: {1}".format(folder, e))
+            return None
+        for name in names:
+            if name.lower().endswith(u"-trailer.mp4") and code_key(name[:-len(u"-trailer.mp4")]) in keys:
+                return os.path.join(folder, name)
+        return None
+
+    def list_dir(self, path):
+        """Return the names of the entries in the folder at `path`.
+
+        Args:
+            path (str): The absolute folder path.
+
+        Returns:
+            list[str]: The entry names, as unicode.
+        """
+        if not isinstance(path, str):
+            path = path.encode("utf-8")
+        return [n.decode("utf-8") if isinstance(n, str) else n for n in os.listdir(path)]
 
     def save_hls(self, url, path):
         """Save the best variant of an HLS stream as an mp4 file with Plex's own ffmpeg build, without re-encoding.

@@ -696,30 +696,52 @@ class TestLocalTrailer(BaseTestCase):
 
     FOLDER = u"/Library/r18 jav/SUN-045 [SUN] - Hot Spring Date (2022)"
     HLS = u"https://media.javtrailers.com/hlsvideo/freepv/1/1su/1sun00045a/playlist.m3u8"
+    MP4 = u"https://flv.duga.jp/unsecure/dandy/0069/noauth/temp.mp4"
 
-    def _trailer(self, url, exists=False, fails=False):
-        self.update_prefs(save_local_files=True)
+    def _trailer(self, url, files=(), fails=False, video=u"SUN-045.mp4", save=True):
+        self.update_prefs(save_local_files=save)
         agent = JAVAgent()
-        agent.path_exists = lambda path: exists
+        agent.list_dir = lambda path: [video] + list(files)
         agent.save_hls = mock.MagicMock(side_effect=OSError("no transcoder") if fails else None)
         self.agent = agent
-        return agent.local_trailer(self.FOLDER + u"/SUN-045.mp4", u"SUN-045", Resource(url))
+        return agent.local_trailer(self.FOLDER + u"/" + video, u"SUN-045", Resource(url) if url else None)
 
     def test_saves_hls_trailer(self):
         self.assertEqual(self.FOLDER + u"/SUN-045-trailer.mp4", self._trailer(self.HLS))
         self.agent.save_hls.assert_called_once_with(self.HLS, self.FOLDER + u"/SUN-045-trailer.mp4")
 
-    def test_reuses_saved_trailer(self):
-        self.assertEqual(self.FOLDER + u"/SUN-045-trailer.mp4", self._trailer(self.HLS, exists=True))
+    def test_existing_trailer_wins(self):
+        self.assertEqual(self.FOLDER + u"/SUN-045-trailer.mp4", self._trailer(self.HLS, files=[u"SUN-045-trailer.mp4"]))
         self.assertEqual(0, self.agent.save_hls.call_count)
+        self.assertEqual(self.FOLDER + u"/SUN-045-trailer.mp4", self._trailer(self.MP4, files=[u"SUN-045-trailer.mp4"], save=False))
+        self.assertEqual(self.FOLDER + u"/SUN-045-trailer.mp4", self._trailer(None, files=[u"SUN-045-trailer.mp4"]))
+
+    def test_existing_trailer_ignores_case_and_tags(self):
+        self.assertEqual(self.FOLDER + u"/sun-045-trailer.mp4", self._trailer(self.MP4, files=[u"sun-045-trailer.mp4"]))
+        self.assertEqual(self.FOLDER + u"/SUN-045-trailer.mp4", self._trailer(self.MP4, files=[u"SUN-045-trailer.mp4"], video=u"SUN-045-ub.mp4"))
+        self.assertIsNone(self._trailer(self.MP4, files=[u"SUN-046-trailer.mp4"]))
 
     def test_keeps_mp4_and_failed_trailers_remote(self):
-        self.assertIsNone(self._trailer(u"https://flv.duga.jp/unsecure/dandy/0069/noauth/temp.mp4"))
+        self.assertIsNone(self._trailer(self.MP4))
         self.assertIsNone(self._trailer(self.HLS, fails=True))
+        self.assertIsNone(self._trailer(None))
 
     def test_needs_save_local_files(self):
-        self.update_prefs(save_local_files=False)
-        self.assertIsNone(JAVAgent().local_trailer(self.FOLDER + u"/SUN-045.mp4", u"SUN-045", Resource(self.HLS)))
+        self.assertIsNone(self._trailer(self.HLS, save=False))
+
+
+class TestApplyMetadataTrailer(BaseTestCase):
+
+    def test_local_trailer_without_remote_one(self):
+        self.update_prefs(save_local_files=False, rename_bare_folders=False, rename_existing_folders=False)
+        agent = JAVAgent()
+        agent.local_trailer = mock.MagicMock(return_value=u"/Library/r18 jav/POW-025/pow-025-trailer.mp4")
+        movie = Movie()
+        meta = Metadata()
+        meta.title = u"T"
+        with mock.patch.object(_main, "TrailerObject", create=True) as trailer_object:
+            agent.apply_metadata(movie, meta, "ja", media_path=u"/Library/r18 jav/POW-025/POW-025.mp4", video_code=u"POW-025")
+        trailer_object.assert_called_once_with(file=u"/Library/r18 jav/POW-025/pow-025-trailer.mp4", thumb=None)
 
 
 class TestBestVariantUrl(BaseTestCase):
