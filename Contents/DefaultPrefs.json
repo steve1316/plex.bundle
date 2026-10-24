@@ -7,7 +7,7 @@
     },
     {
         "id": "save_local_files",
-        "label": "Save poster, fanart, extrafanart, actress photos and NFO to the media folder",
+        "label": "Save poster, fanart, extrafanart, actress photos, NFO and streamed trailers (as mp4) to the media folder",
         "type": "bool",
         "default": true
     },

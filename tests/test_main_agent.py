@@ -692,6 +692,61 @@ class TestApplyMetadataSavesLocalFiles(BaseTestCase):
         self._apply(agent)
 
 
+class TestLocalTrailer(BaseTestCase):
+
+    FOLDER = u"/Library/r18 jav/SUN-045 [SUN] - Hot Spring Date (2022)"
+    HLS = u"https://media.javtrailers.com/hlsvideo/freepv/1/1su/1sun00045a/playlist.m3u8"
+
+    def _trailer(self, url, exists=False, fails=False):
+        self.update_prefs(save_local_files=True)
+        agent = JAVAgent()
+        agent.path_exists = lambda path: exists
+        agent.save_hls = mock.MagicMock(side_effect=OSError("no transcoder") if fails else None)
+        self.agent = agent
+        return agent.local_trailer(self.FOLDER + u"/SUN-045.mp4", u"SUN-045", Resource(url))
+
+    def test_saves_hls_trailer(self):
+        self.assertEqual(self.FOLDER + u"/SUN-045-trailer.mp4", self._trailer(self.HLS))
+        self.agent.save_hls.assert_called_once_with(self.HLS, self.FOLDER + u"/SUN-045-trailer.mp4")
+
+    def test_reuses_saved_trailer(self):
+        self.assertEqual(self.FOLDER + u"/SUN-045-trailer.mp4", self._trailer(self.HLS, exists=True))
+        self.assertEqual(0, self.agent.save_hls.call_count)
+
+    def test_keeps_mp4_and_failed_trailers_remote(self):
+        self.assertIsNone(self._trailer(u"https://flv.duga.jp/unsecure/dandy/0069/noauth/temp.mp4"))
+        self.assertIsNone(self._trailer(self.HLS, fails=True))
+
+    def test_needs_save_local_files(self):
+        self.update_prefs(save_local_files=False)
+        self.assertIsNone(JAVAgent().local_trailer(self.FOLDER + u"/SUN-045.mp4", u"SUN-045", Resource(self.HLS)))
+
+
+class TestBestVariantUrl(BaseTestCase):
+
+    MASTER = u"https://media.javtrailers.com/hlsvideo/freepv/1/1su/1sun00045a/playlist.m3u8"
+
+    def test_picks_highest_bandwidth(self):
+        playlist = ("#EXTM3U\n#EXT-X-VERSION:3\n"
+                    "#EXT-X-STREAM-INF:BANDWIDTH=2203377,RESOLUTION=768x432\n1sun00045ammb.m3u8\n"
+                    "#EXT-X-STREAM-INF:BANDWIDTH=6587060,RESOLUTION=1920x1080\n1sun00045ahhb.m3u8\n"
+                    "#EXT-X-STREAM-INF:BANDWIDTH=4390035,RESOLUTION=1280x720\n1sun00045ahmb.m3u8\n")
+        self.assertEqual(u"https://media.javtrailers.com/hlsvideo/freepv/1/1su/1sun00045a/1sun00045ahhb.m3u8", _main.best_variant_url(self.MASTER, playlist))
+
+    def test_media_playlist_unchanged(self):
+        self.assertEqual(self.MASTER, _main.best_variant_url(self.MASTER, "#EXTM3U\n#EXTINF:4.004,\nseg0.ts\n"))
+
+
+class TestTranscoderCodecsDir(BaseTestCase):
+
+    def test_escapes_spaces(self):
+        root = u"/config/Library/Application Support/Plex Media Server/Codecs"
+        with mock.patch.dict(_main.os.environ, {"PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR": "/config/Library/Application Support"}), \
+                mock.patch.object(_main.os, "listdir", return_value=["EasyAudioEncoder-1847-linux-x86_64", "a336ba9-16a9-linux-x86_64"]), \
+                mock.patch.object(_main.os.path, "exists", side_effect=lambda path: path.startswith(root + "/a336ba9")):
+            self.assertEqual("/config/Library/Application\\ Support/Plex\\ Media\\ Server/Codecs/a336ba9-16a9-linux-x86_64/", _main.transcoder_codecs_dir())
+
+
 class TestBuildFolderName(BaseTestCase):
 
     def _metadata(self, title=u"DANDY-149 The Temptation", studio=u"DANDY", year=2009):

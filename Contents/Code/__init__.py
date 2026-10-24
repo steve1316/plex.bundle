@@ -9,7 +9,7 @@ import os
 import re
 import struct
 import requests
-from urlparse import urlparse
+from urlparse import urljoin, urlparse
 from xml.sax.saxutils import escape
 
 import agents
@@ -38,6 +38,9 @@ MAX_FOLDER_NAME_BYTES = 240
 
 # Splits a folder name like "DANDY-149 [DANDY] - The Temptation (2009)" into its code, the rest, and the year.
 FOLDER_NAME_RE = re.compile(r"^(\S+)(.*?)( \(\d{4}\))?$", re.UNICODE)
+
+# Matches each variant of an HLS master playlist: its bandwidth and, on the next line, its playlist url.
+HLS_VARIANT_RE = re.compile(r"BANDWIDTH=(\d+)[^\n]*\n([^#\s][^\n]*)")
 
 # Getchu refuses image requests (403) that do not come from its own pages.
 GETCHU_IMAGE_REFERER = "https://www.getchu.com/"
@@ -329,7 +332,7 @@ class JAVAgent(Agent.Movies):
 
         if metadata.trailers:
             trailer = TrailerObject(
-                file=metadata.trailers[0],
+                file=self.local_trailer(media_path, video_code, metadata.trailers[0]) or metadata.trailers[0],
                 thumb=metadata.trailers[0].thumb
             )
             movie.extras.add(trailer)
@@ -402,6 +405,62 @@ class JAVAgent(Agent.Movies):
         nfo_name = os.path.splitext(os.path.basename(media_path))[0] + u".nfo"
         self.write_file(os.path.join(folder, nfo_name), build_nfo(metadata, lang, video_code, poster_url))
         Log.Info("Saved local files to %s", folder)
+
+    def local_trailer(self, media_path, video_code, trailer):
+        """Return the path of a local mp4 copy of an HLS trailer, saving it next to the video first when it is missing.
+
+        Plex has to transcode a remote HLS trailer on every play and seek, while a local mp4 plays directly. Other trailers are
+        already mp4 files, so they are left remote.
+
+        Args:
+            media_path (str): Path of the video file, or None.
+            video_code (str): The video code, e.g. "SUN-045".
+            trailer (Resource): The trailer url.
+
+        Returns:
+            str: The path of `<video name>-trailer.mp4`, or None when the trailer is not HLS, local files are off or saving failed.
+        """
+        if not Prefs["save_local_files"] or not media_path or not trailer.split("?")[0].endswith(".m3u8"):
+            return None
+        if isinstance(media_path, str):
+            media_path = media_path.decode("utf-8")
+        if not folder_matches_code(os.path.dirname(media_path), video_code):
+            return None
+        path = os.path.splitext(media_path)[0] + u"-trailer.mp4"
+        if self.path_exists(path):
+            return path
+        try:
+            self.save_hls(trailer, path)
+        except Exception as e:
+            Log.Warn(u"Failed to save trailer {0} to {1}: {2}".format(trailer, path, e))
+            return None
+        Log.Info(u"Saved trailer {0} to {1}".format(trailer, path))
+        return path
+
+    def save_hls(self, url, path):
+        """Save the best variant of an HLS stream as an mp4 file with Plex's own ffmpeg build, without re-encoding.
+
+        Args:
+            url (str): The HLS master or media playlist url.
+            path (str): The mp4 file to write.
+
+        Raises:
+            Exception: When the playlist cannot be fetched or the transcoder fails.
+        """
+        import subprocess
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        part = (path + u".part").encode("utf-8")
+        home = os.environ.get("PLEX_MEDIA_SERVER_HOME", "/usr/lib/plexmediaserver")
+        command = [os.path.join(home, "Plex Transcoder"), "-nostdin", "-loglevel", "error", "-y", "-rw_timeout", "30000000",
+                   "-i", best_variant_url(url, resp.content), "-c", "copy", "-movflags", "+faststart", "-f", "mp4", part]
+        env = dict(os.environ)
+        env["FFMPEG_EXTERNAL_LIBS"] = transcoder_codecs_dir()
+        proc = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out, err = proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError("Plex Transcoder exited with {0}: {1}".format(proc.returncode, err.strip()))
+        self.move_path(part, path)
 
     def save_extrafanart(self, folder, metadata):
         """Replace `extrafanart/` with every distinct sample image, largest first.
@@ -1069,6 +1128,37 @@ def update_folder_name(folder, metadata, code):
     if not year and metadata.release_date:
         year = u" ({0})".format(metadata.release_date.year)
     return code + match.group(2) + (year or u"")
+
+
+def best_variant_url(url, playlist):
+    """Return the url of the highest-bandwidth variant of an HLS master playlist.
+
+    Args:
+        url (str): The url the playlist was fetched from, used to resolve relative variant urls.
+        playlist (str): The playlist text.
+
+    Returns:
+        str: The absolute url of the best variant, or `url` itself when the playlist lists no variants.
+    """
+    variants = HLS_VARIANT_RE.findall(playlist)
+    if not variants:
+        return url
+    best = max(variants, key=lambda v: int(v[0]))
+    return urljoin(url, best[1].strip())
+
+
+def transcoder_codecs_dir():
+    """Return the codec folder Plex Transcoder loads its decoders from, in the escaped form Plex itself passes.
+
+    Returns:
+        str: The `Codecs/<build>-linux-...` folder with its spaces escaped by backslashes, or "" when none is found.
+    """
+    root = os.path.join(os.environ.get("PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR", "/config/Library/Application Support"), "Plex Media Server", "Codecs")
+    for name in sorted(os.listdir(root)):
+        folder = os.path.join(root, name)
+        if os.path.exists(os.path.join(folder, "libh264_decoder.so")):
+            return folder.replace(" ", "\\ ") + "/"
+    return ""
 
 
 def nfo_text(value):
