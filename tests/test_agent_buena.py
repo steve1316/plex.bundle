@@ -146,6 +146,13 @@ class TestBuenaAgent(AgentTestCase):
         metadata = self.agent.get_metadata(u"BUENA-082", u"BUENA-082", "ja")
         self.assertStudioIs(u"POW", metadata)
 
+    def test_metadata_buenap_media_row(self):
+        # BUENA-084's media row starts with buenap023, which still belongs to BUENA-084 rather than a new entry
+        metadata = self.agent.get_metadata(u"BUENA-084", u"BUENA-084", "ja")
+        self.assertTrue(metadata.summary)
+        self.assertTrue([p for p in metadata.posters if u"/pow023/pow023jp.jpg" in p])
+        self.assertTrue(metadata.trailers)
+
     def test_metadata_actressless_entry(self):
         # an entry with an empty 【】 header still resolves with no cast
         metadata = self.agent.get_metadata(u"BUENA-077", u"BUENA-077", "ja")

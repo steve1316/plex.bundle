@@ -489,6 +489,9 @@ class Buena(SearchAgent, MetadataAgent):
                 entry = None
                 continue
             code = self.primary_code(cells[0])
+            # A media row may start with the buenap code of the same release, e.g. buenap023 under buena084.
+            if code and entry is not None and code.startswith(u"BUENAP-") and not entry.code.startswith(u"BUENAP-"):
+                code = entry.code
             if code and (entry is None or code != entry.code):
                 entry = self.new_entry(code, header)
                 entries.append(entry)
