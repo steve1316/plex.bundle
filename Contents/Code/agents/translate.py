@@ -222,6 +222,10 @@ class Translate(PartialMetadataAgent):
             self.logger.exception("Translation failed: %s", e)
             return
 
+        if not isinstance(translated, dict):
+            return
+        # Keep only the fields that were sent. The model sometimes invents one, e.g. a "summary" copied from the title.
+        translated = dict((key, value) for key, value in translated.items() if key in input_data)
         if not translated:
             return
 
@@ -237,7 +241,7 @@ class Translate(PartialMetadataAgent):
             if self.is_bad_translation(english):
                 # Model leaked JSON or left the text untranslated. Keep the clean original rather than a corrupted mix.
                 self.logger.warning(
-                    "Discarding malformed summary translation, keeping original")
+                    "Discarding malformed summary translation, keeping original: %r", english[:200])
             elif original and original.strip() != english.strip():
                 metadata.summary = u"{0}\n\n{1}".format(english, original)
             else:

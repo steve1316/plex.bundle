@@ -4,6 +4,8 @@ from base import BaseTestCase
 
 import unittest
 
+import mock
+
 from agents.translate import Translate
 from agents.types import Metadata, Person, Resource
 
@@ -124,6 +126,33 @@ class TestIsBadTranslation(BaseTestCase):
     def test_empty_is_rejected(self):
         self.assertTrue(self.agent.is_bad_translation(u""))
         self.assertTrue(self.agent.is_bad_translation(None))
+
+
+class TestLlmTranslate(BaseTestCase):
+    """Verify only the fields sent to the model are taken from its reply."""
+
+    def setUp(self):
+        super(TestLlmTranslate, self).setUp()
+        self.agent = Translate(Prefs)
+
+    def translate(self, meta, reply):
+        with mock.patch.object(self.agent, "call_ollama", return_value=reply):
+            self.agent.llm_translate(u"STAR-193", meta, "ja")
+
+    def test_ignores_invented_fields(self):
+        # The real STAR-193 failure: no summary was sent, but the model returned the title as one.
+        meta = Metadata()
+        meta.japanese_title = u"STAR-193 芸能人 原紗央莉"
+        self.translate(meta, {"title": u"Celebrity Saori Hara", "summary": u"芸能人 原紗央莉", "genres": [u"Slut"]})
+        self.assertEqual(u"STAR-193 Celebrity Saori Hara", meta.title)
+        self.assertIsNone(meta.summary)
+        self.assertFalse(meta.genres)
+
+    def test_non_object_reply_is_ignored(self):
+        meta = Metadata()
+        meta.japanese_title = u"STAR-193 芸能人 原紗央莉"
+        self.translate(meta, [u"Celebrity Saori Hara"])
+        self.assertIsNone(meta.title)
 
 
 if __name__ == "__main__":
